@@ -171,6 +171,20 @@ function renderAssignmentLogs(logs) {
 }
 
 function renderAssignmentJob(job) {
+  if (job.kind === "BATCH_ASSIGNMENT") {
+    $("assignTotalStat").textContent = job.total;
+    $("assignOutcomeStat").textContent = `${job.results.filter((row) => row.status === "ASSIGNED").length} affecté(s)`;
+    $("assignMissingStat").textContent = job.results.filter((row) => row.status === "INVALID").length;
+    $("assignSaturatedStat").textContent = job.results.filter((row) => row.status === "NO_PORT").length;
+    $("assignProgressBar").style.width = `${job.progress_percent}%`;
+    $("assignStatusBadge").textContent = ({ RUNNING: "En cours", STOPPING: "Arrêt…", STOPPED: "Arrêté", COMPLETED: "Terminé", REVIEW_REQUIRED: "À confirmer", ERROR: "Erreur", QUEUED: "Préparation" })[job.status] || job.status;
+    $("assignResultsBody").innerHTML = job.results.map((row) => `<tr><td>${escapeHtml(row.excel_row)}</td><td class="pco-code">${escapeHtml(row.login)} · ${escapeHtml(row.spl)}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td><strong>${escapeHtml(row.pco ? `${row.pco} / ${row.selected_port || "—"}` : "—")}</strong></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`).join("");
+    renderAssignmentLogs(job.logs);
+    const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
+    $("assignStartBtn").disabled = active; $("assignStopBtn").disabled = !active; $("assignClearBtn").disabled = active;
+    if (!active) $("assignMessage").innerHTML = `<div class="${job.status === "ERROR" ? "error" : "success"}"><strong>Affectation en lot ${job.status === "COMPLETED" ? "terminée" : job.status.toLowerCase()}.</strong> ${job.completed_count} / ${job.total} ligne(s) traitée(s).</div>`;
+    return;
+  }
   const assigned = job.assigned_result;
   $("assignTotalStat").textContent = job.total;
   $("assignOutcomeStat").textContent = assigned ? `Port ${assigned.selected_port}` : (job.status === "COMPLETED" ? "Aucun" : "—");
@@ -217,6 +231,18 @@ async function pollAssignmentJob() {
 }
 
 async function startAssignment() {
+  const batchFile = $("assignBatchFile").files[0];
+  if (batchFile) {
+    const formData = new FormData(); formData.append("file", batchFile);
+    $("assignMessage").innerHTML = '<div class="notice">Lecture du fichier Login/SPL…</div>';
+    $("assignStartBtn").disabled = true;
+    try {
+      const data = await api("/api/assign/batch/start", { method: "POST", body: formData });
+      currentAssignmentJobId = data.job_id; renderAssignmentJob(data.job);
+      clearInterval(assignmentPollTimer); assignmentPollTimer = setInterval(pollAssignmentJob, 800); pollAssignmentJob();
+    } catch (error) { $("assignStartBtn").disabled = false; $("assignMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`; }
+    return;
+  }
   const login = $("assignLoginInput").value.trim();
   const spl = $("assignSplInput").value.trim();
   if (!login) return toast("Saisissez le Login client.");
@@ -262,10 +288,25 @@ function clearAssignment() {
   $("assignStatusBadge").textContent = "En attente";
   $("assignStatusBadge").className = "badge neutral";
   $("assignMessage").innerHTML = "";
+  $("assignBatchFile").value = "";
   renderAssignmentRows([]);
   renderAssignmentLogs([]);
   $("assignStartBtn").disabled = false;
   $("assignStopBtn").disabled = true;
+}
+
+async function resolveMsanPort() {
+  const port = $("assignMsanPort").value.trim();
+  if (!port) return toast("Saisissez le port MSAN.");
+  try { const data = await api(`/api/config/msan-mapping/resolve?port=${encodeURIComponent(port)}`); $("assignSplInput").value = data.spl; previewAssignmentSpl(); toast(`SPL trouvé : ${data.spl}`); }
+  catch (error) { toast(error.message); }
+}
+
+async function uploadMsanMapping() {
+  const file = $("msanMappingFile").files[0]; if (!file) return toast("Sélectionnez le fichier Carte/SPL.");
+  const formData = new FormData(); formData.append("file", file);
+  try { const data = await api("/api/config/msan-mapping", { method: "POST", body: formData }); toast(`${data.count} correspondance(s) importée(s).`); }
+  catch (error) { toast(error.message); }
 }
 
 function renderBulkRows(rows) {
@@ -582,6 +623,8 @@ $("clearBtn").addEventListener("click", clearResults);
 $("assignStartBtn").addEventListener("click", startAssignment);
 $("assignStopBtn").addEventListener("click", stopAssignment);
 $("assignClearBtn").addEventListener("click", clearAssignment);
+$("resolveMsanBtn").addEventListener("click", resolveMsanPort);
+$("uploadMsanMappingBtn").addEventListener("click", uploadMsanMapping);
 $("bulkFileInput").addEventListener("change", updateBulkFileMeta);
 $("bulkStartBtn").addEventListener("click", startBulkMutation);
 $("bulkStopBtn").addEventListener("click", stopBulkMutation);

@@ -21,6 +21,10 @@ from uuid import uuid4
 from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from bulk_excel import parse_bulk_workbook, write_bulk_results
+from assignment_excel import (
+    parse_assignment_workbook, parse_msan_mapping, resolve_msan_spl,
+    save_msan_mapping,
+)
 from config import load_config, save_config
 from pco_logic import parse_spl
 from wimtech_assigner import assign_login_to_first_port
@@ -31,6 +35,7 @@ from wimtech_checker import check_all_pcos
 BASE_DIR = Path(__file__).resolve().parent
 LATEST_RESULTS_PATH = BASE_DIR / "data" / "available_pcos.json"
 BULK_RESULTS_DIR = BASE_DIR / "data" / "bulk_results"
+MSAN_MAPPING_PATH = BASE_DIR / "data" / "msan_spl_mapping.json"
 
 app = Flask(__name__)
 jobs: dict[str, dict] = {}
@@ -239,6 +244,62 @@ def run_assignment_job(job_id: str) -> None:
             current["updated_at"] = current["finished_at"]
 
 
+def run_batch_assignment_job(job_id: str) -> None:
+    with jobs_lock:
+        job = jobs[job_id]
+        job["status"] = "RUNNING"
+        job["started_at"] = utc_now()
+        rows = copy.deepcopy(job["assignment_rows"])
+        stop_event = job["stop_event"]
+
+    try:
+        for index, row in enumerate(rows):
+            if stop_event.is_set():
+                break
+            started = time.monotonic()
+            detail_results = []
+            if row.get("validation_error"):
+                result = {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
+            else:
+                spl_data = parse_spl(row["spl"]).to_dict()
+                add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
+                assigned = assign_login_to_first_port(
+                    config=load_config(), login=row["login"], odf=spl_data["odf"],
+                    zr=spl_data["zr"], candidates=spl_data["pco_candidates"],
+                    is_stopped=stop_event.is_set,
+                    on_log=lambda level, message: add_log(job_id, level, message),
+                    on_result=lambda _i, item: detail_results.append(item),
+                )
+                uncertain = next((item for item in detail_results if item.get("status") == "MUTATION_UNKNOWN"), None)
+                if assigned:
+                    result = {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
+                elif uncertain:
+                    result = {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
+                else:
+                    result = {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": "Aucun port utilisable trouvé."}
+            result["duration_seconds"] = round(time.monotonic() - started, 2)
+            result["checked_at"] = utc_now()
+            with jobs_lock:
+                jobs[job_id]["results"][index] = result
+                jobs[job_id]["completed_count"] = index + 1
+                jobs[job_id]["updated_at"] = result["checked_at"]
+            if result["status"] == "MUTATION_UNKNOWN":
+                break
+        with jobs_lock:
+            current = jobs[job_id]
+            if any(row.get("status") == "MUTATION_UNKNOWN" for row in current["results"]):
+                current["status"] = "REVIEW_REQUIRED"
+            else:
+                current["status"] = "STOPPED" if stop_event.is_set() else "COMPLETED"
+            current["finished_at"] = utc_now()
+            current["updated_at"] = current["finished_at"]
+    except Exception as exc:
+        add_log(job_id, "ERROR", f"Erreur affectation en lot : {exc}")
+        with jobs_lock:
+            jobs[job_id]["status"] = "ERROR"
+            jobs[job_id]["error"] = str(exc)
+            jobs[job_id]["finished_at"] = utc_now()
+
 def run_bulk_job(job_id: str) -> None:
     with jobs_lock:
         job = jobs[job_id]
@@ -336,6 +397,31 @@ def update_config():
     except ValueError as exc:
         return jsonify(ok=False, error=str(exc)), 400
     return jsonify(ok=True, config=config)
+
+
+@app.post("/api/config/msan-mapping")
+def upload_msan_mapping():
+    uploaded = request.files.get("file")
+    suffix = Path(uploaded.filename or "").suffix.lower() if uploaded else ""
+    if not uploaded or suffix not in {".xlsx", ".xlsm", ".csv"}:
+        return jsonify(ok=False, error="Format accepté : .xlsx, .xlsm ou .csv."), 400
+    try:
+        mappings = parse_msan_mapping(uploaded.stream.read(15 * 1024 * 1024 + 1), suffix)
+        save_msan_mapping(MSAN_MAPPING_PATH, mappings)
+    except (ValueError, RuntimeError) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    return jsonify(ok=True, count=len(mappings))
+
+
+@app.get("/api/config/msan-mapping/resolve")
+def resolve_msan_mapping():
+    port = request.args.get("port", "").strip()
+    if not port:
+        return jsonify(ok=False, error="Le port MSAN est obligatoire."), 400
+    spl = resolve_msan_spl(MSAN_MAPPING_PATH, port)
+    if not spl:
+        return jsonify(ok=False, error=f"Aucun SPL trouvé pour {port}."), 404
+    return jsonify(ok=True, port=port, spl=spl)
 
 
 @app.post("/api/check/start")
@@ -473,10 +559,39 @@ def start_assignment():
     return jsonify(ok=True, job_id=job_id, job=public_job(job))
 
 
+@app.post("/api/assign/batch/start")
+def start_batch_assignment():
+    uploaded = request.files.get("file")
+    if not uploaded or Path(uploaded.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
+        return jsonify(ok=False, error="Sélectionnez un fichier Excel .xlsx ou .xlsm avec Login et SPL."), 400
+    try:
+        rows = parse_assignment_workbook(uploaded.stream.read(15 * 1024 * 1024 + 1))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    with jobs_lock:
+        active = next((value for value in jobs.values() if value["status"] in {"QUEUED", "RUNNING", "PAUSED", "STOPPING"}), None)
+        if active:
+            return jsonify(ok=False, error="Une automatisation Selenium est déjà en cours.", job_id=active["job_id"]), 409
+        job_id, now = uuid4().hex, utc_now()
+        job = {
+            "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
+            "status": "QUEUED", "created_at": now, "started_at": None,
+            "finished_at": None, "updated_at": now, "error": None,
+            "total": len(rows), "completed_count": 0,
+            "results": [{**row, "status": "PENDING", "status_label": "En attente", "pco": None, "selected_port": None, "message": row.get("validation_error") or "En attente."} for row in rows],
+            "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None,
+        }
+        job["run_event"].set()
+        jobs[job_id] = job
+        job["thread"] = Thread(target=run_batch_assignment_job, args=(job_id,), daemon=True)
+        job["thread"].start()
+    return jsonify(ok=True, job_id=job_id, job=public_job(job))
+
+
 @app.get("/api/assign/<job_id>")
 def assignment_status(job_id: str):
     job = snapshot_job(job_id)
-    if not job or job.get("kind") != "ASSIGNMENT":
+    if not job or job.get("kind") not in {"ASSIGNMENT", "BATCH_ASSIGNMENT"}:
         return jsonify(ok=False, error="Affectation introuvable."), 404
     return jsonify(ok=True, job=job)
 
@@ -485,7 +600,7 @@ def assignment_status(job_id: str):
 def stop_assignment(job_id: str):
     with jobs_lock:
         job = jobs.get(job_id)
-        if not job or job.get("kind") != "ASSIGNMENT":
+        if not job or job.get("kind") not in {"ASSIGNMENT", "BATCH_ASSIGNMENT"}:
             return jsonify(ok=False, error="Affectation introuvable."), 404
         if job["status"] not in {"RUNNING", "QUEUED"}:
             return jsonify(ok=False, error="L’affectation est déjà terminée."), 409
@@ -685,17 +800,13 @@ def export_available_csv(job_id: str):
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["SPL", "ODF", "ZR", "PCO", "Ports libres", "Nombre libre", "Date contrôle"])
+    writer.writerow(["SPL", "ODF", "ZR", "PCO", "brin", "Date contrôle"])
     for row in job["available_pcos"]:
-        writer.writerow([
-            job["spl"],
-            job["odf"],
-            job["zr"],
-            row["pco"],
-            " | ".join(row.get("free_ports", [])),
-            row.get("free_count", 0),
-            row.get("checked_at", ""),
-        ])
+        for brin in row.get("free_ports", []):
+            writer.writerow([
+                job["spl"], job["odf"], job["zr"], row["pco"], brin,
+                row.get("checked_at", ""),
+            ])
 
     return Response(
         "\ufeff" + output.getvalue(),

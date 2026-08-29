@@ -104,6 +104,10 @@
               <div class="preview-box"><small>ODF</small><strong id="assignOdfPreview">—</strong></div>
               <div class="preview-box"><small>Zone réseau</small><strong id="assignZrPreview">—</strong></div>
             </div>
+            <div class="bulk-input-grid top-gap">
+              <div class="field"><label for="assignBatchFile">Affectation en lot (Excel)</label><input id="assignBatchFile" type="file" accept=".xlsx,.xlsm"><small>Colonnes : Login · SPL</small></div>
+              <div class="field"><label for="assignMsanPort">Ou rechercher le SPL par port MSAN</label><input id="assignMsanPort" type="text" placeholder="Ex. GHI-FF-AinKadous:0-0-3-0"><button id="resolveMsanBtn" class="secondary top-gap" type="button">Rechercher le SPL</button></div>
+            </div>
             <div class="actions">
               <button id="assignStartBtn" class="primary" type="button">⇄ Affecter le premier port</button>
               <button id="assignStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button>
@@ -215,6 +219,8 @@
               <label class="check-row"><input id="headless" name="headless" type="checkbox"><span>Exécuter Chrome en arrière-plan</span></label>
               <div class="actions full"><button class="primary" type="submit">Enregistrer</button></div>
             </form>
+            <div class="field full top-gap"><label for="msanMappingFile">Correspondance PORT MSAN → SPL</label><input id="msanMappingFile" type="file" accept=".xlsx,.xlsm,.csv"><small>Colonnes : Carte · Splitter ou SRO</small></div>
+            <div class="actions"><button id="uploadMsanMappingBtn" class="secondary" type="button">Importer la correspondance</button></div>
             <div class="warning top-gap"><strong>Conseil :</strong> laissez Chrome visible pendant les premiers essais. Si WimTech change son HTML, un diagnostic est enregistré localement pour ajuster les sélecteurs.</div>
           </article>
         </section>

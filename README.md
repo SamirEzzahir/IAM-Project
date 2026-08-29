@@ -29,6 +29,17 @@ utilisable, l’interface conserve la liste complète avec le motif de chaque PC
 après le clic sur `+`, l’automatisation s’arrête en état **À confirmer** afin de
 ne pas risquer une deuxième mutation du même Login.
 
+L'affectation peut aussi être lancée en lot avec un fichier Excel contenant
+les colonnes `Login` et `SPL`. Les lignes sont traitées l'une après l'autre avec
+exactement la même recherche des PCO et du premier brin utilisable. Une mutation
+à confirmer arrête le lot afin d'éviter toute double mutation.
+
+Une correspondance PORT MSAN → SPL peut être importée dans **Configuration** au
+format `.xlsx`, `.xlsm` ou `.csv`, avec les colonnes `Carte` et
+`Splitter ou SRO`. Dans **Affectation automatique**, la recherche d'une carte,
+par exemple `GHI-FF-AinKadous:0-0-3-0`, remplit automatiquement son SPL avant
+l'affectation.
+
 ## Bulk Mutation CMD&Login
 
 L’onglet **Bulk Mutation CMD&Login** accepte un fichier `.xlsx` ou `.xlsm` et
