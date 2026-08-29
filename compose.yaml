@@ -1,0 +1,20 @@
+services:
+  fb-emm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fb-emm
+    restart: unless-stopped
+    ports:
+      - "5055:5055"
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 5055
+      OPEN_BROWSER: 0
+      CONTAINER: 1
+      FORCE_CHROME_HEADLESS: 1
+      CHROME_BINARY: /usr/bin/chromium
+    volumes:
+      - ./data:/app/data
+      - ./diagnostics:/app/diagnostics
+    shm_size: "1gb"

@@ -72,7 +72,7 @@ premier. Exemple : `OFAD33-ZO-31611`.
 - En cas d'erreur technique sur la base, `/1` et `/2` sont quand même contrôlés
   car l'existence du PCO 8 FO n'a pas été confirmée.
 
-## Installation sous Windows
+## Installation et exécution en mode développement sous Windows
 
 Prérequis :
 
@@ -80,7 +80,61 @@ Prérequis :
 - Google Chrome installé ;
 - accès au réseau interne et à `http://wimtech`.
 
-Double-cliquer sur `run.bat`. Le script installe Flask et Selenium, démarre
+Ouvrir **Invite de commandes (CMD)** dans le dossier du projet, puis créer
+l'environnement virtuel :
+
+```bat
+py -m venv .venv
+```
+
+Vérifier sa création :
+
+```bat
+dir .venv\Scripts
+```
+
+Le dossier doit notamment contenir :
+
+```text
+activate.bat
+Activate.ps1
+pip.exe
+python.exe
+```
+
+Activer ensuite l'environnement virtuel depuis CMD :
+
+```bat
+call .venv\Scripts\activate.bat
+```
+
+L'invite de commandes doit maintenant commencer par `(.venv)`, par exemple :
+
+```text
+(.venv) C:\Users\Samir\Desktop\projet IAM\local_app>
+```
+
+Installer les dépendances du projet :
+
+```bat
+python -m pip install -r requirements.txt
+```
+
+Lancer enfin l'application en mode développement local :
+
+```bat
+python app.py
+```
+
+Ouvrir `http://127.0.0.1:5055` dans le navigateur. Pour arrêter le serveur,
+utiliser `Ctrl+C`. Lors d'une prochaine session, il suffit de réactiver
+l'environnement avec `call .venv\Scripts\activate.bat`, puis de relancer
+`python app.py`.
+
+### Démarrage automatique sous Windows
+
+Il est également possible de double-cliquer sur `run.bat`. Le script crée
+l'environnement `.venv` si nécessaire, installe Flask et Selenium, démarre
 l'application, puis ouvre automatiquement `http://127.0.0.1:5055`.
 
 ## Configuration

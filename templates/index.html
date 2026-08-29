@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FB EMM - Contrôle PCO</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-placeholder">MT</div>
+        <div class="brand-copy">
+          <strong>MAROC TELECOM</strong>
+          <span>Outils réseau fibre</span>
+        </div>
+      </div>
+      <div class="sidebar-label">Navigation</div>
+      <nav class="nav" aria-label="Navigation principale">
+        <button class="active" data-tab="check"><span class="nav-icon">⌕</span><span>Contrôle des PCO</span></button>
+        <button data-tab="assign"><span class="nav-icon">⇄</span><span>Affectation automatique</span></button>
+        <button data-tab="bulk"><span class="nav-icon">▤</span><span>Bulk Mutation CMD&amp;Login</span></button>
+        <button data-tab="available"><span class="nav-icon">✓</span><span>PCO disponibles</span></button>
+        <button data-tab="config"><span class="nav-icon">⚙</span><span>Configuration</span></button>
+      </nav>
+      <div class="sidebar-foot"><span class="status-dot"></span>WimTech Automation</div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="page-heading">
+          <span class="title-accent"></span>
+          <div>
+            <h1 id="pageTitle">FB EMM · Contrôle PCO</h1>
+            <div id="pageSubtitle" class="subtitle">Génération SPL et vérification des ports libres</div>
+          </div>
+        </div>
+        <div class="pill"><span id="serverDot" class="dot"></span><span id="serverStatus">Connexion…</span></div>
+      </header>
+
+      <div class="app">
+        <section id="tab-check" class="tab active">
+          <article class="card panel">
+            <div class="notice"><strong>Contrôle EMM.</strong> Saisissez un SPL : l’application génère les 12 PCO possibles, les vérifie dans WimTech avec une seule session Chrome et conserve ceux qui possèdent des ports libres.</div>
+            <div class="input-grid">
+              <div class="field main-field">
+                <label for="splInput">Numéro SPL</label>
+                <input id="splInput" type="text" value="OFAD33-ZO-113.16" placeholder="Ex. OFAD33-ZO-113.16" autocomplete="off">
+              </div>
+              <div class="preview-box"><small>ODF</small><strong id="odfPreview">—</strong></div>
+              <div class="preview-box"><small>Zone réseau</small><strong id="zrPreview">—</strong></div>
+            </div>
+            <div class="actions">
+              <button id="startBtn" class="primary" type="button">▶ Lancer la vérification</button>
+              <button id="pauseBtn" class="secondary" type="button" disabled>Ⅱ Pause</button>
+              <button id="resumeBtn" class="secondary" type="button" disabled>▶ Reprendre</button>
+              <button id="stopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button>
+              <button id="clearBtn" class="secondary" type="button">↻ Effacer</button>
+            </div>
+            <div id="actionMessage" class="message-slot"></div>
+          </article>
+
+          <div class="summary-grid">
+            <article class="summary-card"><span class="summary-icon neutral">▦</span><div><small>PCO générés</small><strong id="totalStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon green">✓</span><div><small>Disponibles</small><strong id="availableStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon red">×</span><div><small>Saturés</small><strong id="saturatedStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon amber">↻</span><div><small>Progression</small><strong id="progressStat">0 / 0</strong></div></article>
+          </div>
+
+          <article class="card results-card">
+            <div class="result-head">
+              <div><h2>Résultats du contrôle</h2><p>Les états WimTech apparaissent ici en temps réel.</p></div>
+              <span id="jobStatusBadge" class="badge neutral">En attente</span>
+            </div>
+            <div class="progress-track"><div id="progressBar"></div></div>
+            <div class="results">
+              <table>
+                <thead><tr><th>#</th><th>PCO</th><th>État WimTech</th><th>Ports libres</th><th>Nombre libre</th><th>Durée</th><th>Message</th></tr></thead>
+                <tbody id="resultsBody"><tr><td colspan="7" class="empty"><strong>Aucun contrôle lancé</strong><span>Saisissez un SPL puis lancez la vérification.</span></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="log-card">
+            <div class="log-title"><span>●</span> Journal en direct</div>
+            <div id="liveLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du lancement de Selenium…</span></div></div>
+          </article>
+        </section>
+
+        <section id="tab-assign" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">⇄</span><div><h2>Affecter un Login au premier port utilisable</h2><p>Recherche automatique des PCO du SPL, sélection du premier port disponible et validation de la mutation.</p></div></div>
+            <div class="warning top-gap"><strong>Action réelle WimTech.</strong> Le lancement clique automatiquement sur <strong>Muter vers (+)</strong>, puis sur les deux boutons <strong>Valider</strong> et enfin sur <strong>Fermer</strong>.</div>
+            <div class="assignment-input-grid">
+              <div class="field">
+                <label for="assignLoginInput">Login client</label>
+                <input id="assignLoginInput" type="text" placeholder="Ex. I10260472" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="assignSplInput">Numéro SPL</label>
+                <input id="assignSplInput" type="text" value="OFAD33-ZO-113.16" placeholder="Ex. OFAD33-ZO-113.16" autocomplete="off">
+              </div>
+              <div class="preview-box"><small>ODF</small><strong id="assignOdfPreview">—</strong></div>
+              <div class="preview-box"><small>Zone réseau</small><strong id="assignZrPreview">—</strong></div>
+            </div>
+            <div class="actions">
+              <button id="assignStartBtn" class="primary" type="button">⇄ Affecter le premier port</button>
+              <button id="assignStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button>
+              <button id="assignClearBtn" class="secondary" type="button">↻ Effacer</button>
+            </div>
+            <div id="assignMessage" class="message-slot"></div>
+          </article>
+
+          <div class="summary-grid">
+            <article class="summary-card"><span class="summary-icon neutral">▦</span><div><small>PCO possibles</small><strong id="assignTotalStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon green">✓</span><div><small>Résultat</small><strong id="assignOutcomeStat">—</strong></div></article>
+            <article class="summary-card"><span class="summary-icon red">×</span><div><small>Inexistants</small><strong id="assignMissingStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon amber">!</span><div><small>Saturés</small><strong id="assignSaturatedStat">0</strong></div></article>
+          </div>
+
+          <article class="card results-card">
+            <div class="result-head">
+              <div><h2>Parcours des PCO</h2><p>Si aucun port n’est utilisable, chaque PCO reste affiché avec son motif.</p></div>
+              <span id="assignStatusBadge" class="badge neutral">En attente</span>
+            </div>
+            <div class="progress-track"><div id="assignProgressBar"></div></div>
+            <div class="results">
+              <table>
+                <thead><tr><th>#</th><th>PCO testé</th><th>Motif</th><th>Port retenu</th><th>Durée</th><th>Message</th></tr></thead>
+                <tbody id="assignResultsBody"><tr><td colspan="6" class="empty"><strong>Aucune affectation lancée</strong><span>Saisissez le Login client et son SPL.</span></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="log-card">
+            <div class="log-title"><span>●</span> Journal de l’affectation</div>
+            <div id="assignLiveLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du lancement de Selenium…</span></div></div>
+          </article>
+        </section>
+
+        <section id="tab-bulk" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">▤</span><div><h2>Bulk Mutation CMD&amp;Login</h2><p>Import Excel avec Commande GPON, Login, PCO complet et brin exact.</p></div></div>
+            <div class="warning top-gap"><strong>Mutation réelle.</strong> Pour chaque ligne, l’application essaie d’abord la Commande avec le mode <strong>NNETO</strong>. Si WimTech retourne <strong>frm:ot_4</strong>, elle recommence avec le Login. Le brin demandé est muté même s’il est <strong>FIBRE-Active</strong> ; son Login actuel est enregistré avant le clic sur <strong>Muter vers (+)</strong>.</div>
+            <div class="bulk-input-grid">
+              <div class="field">
+                <label for="bulkFileInput">Fichier Excel</label>
+                <input id="bulkFileInput" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+              </div>
+              <div class="excel-columns">
+                <small>Colonnes utilisées</small>
+                <strong>Commande GPON · Login · PCO · brin</strong>
+                <span>Ex. OFOF-ZO-7122/2 → ODF OFOF · ZR OFOF-ZO</span>
+              </div>
+            </div>
+            <div id="bulkFileMeta" class="notice top-gap">Aucun fichier sélectionné.</div>
+            <div class="actions">
+              <button id="bulkStartBtn" class="primary" type="button">▤ Lancer Bulk Mutation</button>
+              <button id="bulkStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button>
+              <button id="bulkClearBtn" class="secondary" type="button">↻ Effacer</button>
+              <a id="bulkDownloadBtn" class="secondary button-link disabled" href="#">↓ Télécharger résultats Excel</a>
+            </div>
+            <div id="bulkMessage" class="message-slot"></div>
+          </article>
+
+          <div class="summary-grid">
+            <article class="summary-card"><span class="summary-icon neutral">▦</span><div><small>Lignes</small><strong id="bulkTotalStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon green">✓</span><div><small>Mutées</small><strong id="bulkSuccessStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon red">×</span><div><small>Échecs</small><strong id="bulkFailedStat">0</strong></div></article>
+            <article class="summary-card"><span class="summary-icon amber">↻</span><div><small>Progression</small><strong id="bulkProgressStat">0 / 0</strong></div></article>
+          </div>
+
+          <article class="card results-card">
+            <div class="result-head">
+              <div><h2>Résultats Bulk Mutation</h2><p>Le Login précédent correspond à celui affiché sur le brin avant la mutation.</p></div>
+              <span id="bulkStatusBadge" class="badge neutral">En attente</span>
+            </div>
+            <div class="progress-track"><div id="bulkProgressBar"></div></div>
+            <div class="results">
+              <table class="bulk-table">
+                <thead><tr><th>Ligne</th><th>Commande GPON</th><th>Login</th><th>PCO</th><th>brin</th><th>Recherche</th><th>Login précédent</th><th>État</th><th>Durée</th><th>Message</th></tr></thead>
+                <tbody id="bulkResultsBody"><tr><td colspan="10" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="log-card">
+            <div class="log-title"><span>●</span> Journal Bulk Mutation</div>
+            <div id="bulkLiveLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du fichier Excel…</span></div></div>
+          </article>
+        </section>
+
+        <section id="tab-available" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">✓</span><div><h2>PCO disponibles</h2><p>Cette collection est réutilisable par les prochaines fonctions EMM.</p></div></div>
+            <div id="availableMeta" class="notice top-gap">Aucun résultat disponible pour le moment.</div>
+            <div class="actions"><a id="downloadCsv" class="primary button-link disabled" href="#">↓ Télécharger CSV</a><button id="refreshAvailableBtn" class="secondary" type="button">↻ Actualiser</button></div>
+            <div class="results top-gap">
+              <table>
+                <thead><tr><th>#</th><th>PCO disponible</th><th>Ports libres</th><th>Nombre libre</th><th>Date du contrôle</th></tr></thead>
+                <tbody id="availableBody"><tr><td colspan="5" class="empty"><strong>Aucun PCO disponible</strong></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section id="tab-config" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">⚙</span><div><h2>Configuration WimTech</h2><p>Ces valeurs restent sur ce poste et sont utilisées uniquement par Python/Selenium.</p></div></div>
+            <form id="configForm" class="config-grid">
+              <div class="field full"><label for="wimtechUrl">URL Mutation GPON</label><input id="wimtechUrl" name="wimtech_url" type="url" required></div>
+              <div class="field"><label for="testLogin">Login de test</label><input id="testLogin" name="test_login" type="text" required></div>
+              <div class="field"><label for="timeoutSeconds">Délai maximum (secondes)</label><input id="timeoutSeconds" name="timeout_seconds" type="number" min="5" max="120" required></div>
+              <label class="check-row"><input id="headless" name="headless" type="checkbox"><span>Exécuter Chrome en arrière-plan</span></label>
+              <div class="actions full"><button class="primary" type="submit">Enregistrer</button></div>
+            </form>
+            <div class="warning top-gap"><strong>Conseil :</strong> laissez Chrome visible pendant les premiers essais. Si WimTech change son HTML, un diagnostic est enregistré localement pour ajuster les sélecteurs.</div>
+          </article>
+        </section>
+
+        <footer class="footer">Powered by · <a href="mailto:s.ez-zahir@iam.ma">Samir EZ-ZAHIR</a></footer>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
