@@ -38,6 +38,7 @@ def locate_bulk_columns(headers: list) -> dict:
         "Commande GPON",
     )
     login_index = first_index({"LOGIN", "LOGINCLIENT"}, "Login")
+    odf_index = first_index({"ODF", "ZR", "SRO", "ZRSRO"}, "ODF")
     brin_index = first_index({"BRIN", "PORT", "PORTFIBRE"}, "brin")
     pco_indices = [index for index, key in enumerate(keys) if key == "PCO"]
     if not pco_indices:
@@ -46,6 +47,7 @@ def locate_bulk_columns(headers: list) -> dict:
     return {
         "command": command_index,
         "login": login_index,
+        "odf": odf_index,
         "pco_indices": pco_indices,
         "brin": brin_index,
     }
@@ -80,6 +82,43 @@ def derive_pco_location(pco: str) -> tuple[str, str]:
     return odf, zr
 
 
+def build_full_pco(odf_value: str, pco_value: str) -> tuple[str, str, str]:
+    """Build the exact WimTech ODF, ZR/SRO and PCO from Excel values."""
+
+    location = cell_text(odf_value).upper().rstrip("-")
+    pco = cell_text(pco_value).upper().strip().strip("-")
+    if not location:
+        raise ValueError("ODF absent.")
+    if not pco:
+        raise ValueError("PCO absent.")
+
+    # A complete PCO is still accepted, but the ODF/ZR column remains the
+    # authoritative location for the new five-column import format.
+    full_pco = pco if "-" in pco else f"{location}-{pco}"
+    if "-ZO" in location:
+        odf = location.split("-ZO", 1)[0]
+        zr = location
+    elif location.endswith("ZO") and len(location) > 2:
+        odf = location[:-2].rstrip("-")
+        zr = location
+    else:
+        odf, zr = derive_pco_location(full_pco)
+    if not odf or not zr:
+        raise ValueError(f"Format ODF/ZR invalide : {location}.")
+    return odf, zr, full_pco
+
+
+def effective_brin(pco: str, brin: str) -> str:
+    """Map Excel brins 5-8 to ports 1-4 for split /1 and /2 PCOs."""
+
+    value = int(cell_text(brin))
+    if value < 1 or value > 8:
+        raise ValueError("brin invalide : la valeur doit être comprise entre 1 et 8.")
+    if re.search(r"/(?:1|2)$", cell_text(pco)) and value >= 5:
+        value -= 4
+    return str(value)
+
+
 def parse_bulk_workbook(content: bytes) -> list[dict]:
     try:
         from openpyxl import load_workbook
@@ -104,26 +143,31 @@ def parse_bulk_workbook(content: bytes) -> list[dict]:
         values = list(values)
         command = cell_text(values[columns["command"]] if columns["command"] < len(values) else "")
         login = cell_text(values[columns["login"]] if columns["login"] < len(values) else "")
+        odf_input = cell_text(values[columns["odf"]] if columns["odf"] < len(values) else "")
         brin = cell_text(values[columns["brin"]] if columns["brin"] < len(values) else "")
         pco = choose_full_pco([
             values[index] if index < len(values) else ""
             for index in columns["pco_indices"]
         ])
-        if not any((command, login, pco, brin)):
+        if not any((command, login, odf_input, pco, brin)):
             continue
 
         error = None
         odf = ""
         zr = ""
+        target_brin = ""
         if not command and not login:
             error = "Commande GPON et Login absents."
         elif not pco:
             error = "PCO absent."
+        elif not odf_input:
+            error = "ODF absent."
         elif not brin or not re.fullmatch(r"\d+", brin):
             error = "brin absent ou invalide."
         else:
             try:
-                odf, zr = derive_pco_location(pco)
+                odf, zr, pco = build_full_pco(odf_input, pco)
+                target_brin = effective_brin(pco, brin)
             except ValueError as exc:
                 error = str(exc)
 
@@ -131,8 +175,10 @@ def parse_bulk_workbook(content: bytes) -> list[dict]:
             "excel_row": excel_row,
             "command": command,
             "login": login,
+            "odf_input": odf_input,
             "pco": pco,
             "brin": str(int(brin)) if brin.isdigit() else brin,
+            "target_brin": target_brin,
             "odf": odf,
             "zr": zr,
             "validation_error": error,
@@ -157,14 +203,16 @@ def write_bulk_results(path: Path, rows: list[dict], results: list[dict]) -> Non
     sheet.title = "Résultats Mutation"
     headers = [
         "Ligne Excel", "Commande GPON", "Login demandé", "PCO", "brin",
-        "Recherche utilisée", "Login précédent", "État", "Message", "Date",
+        "Brin utilisé", "Recherche utilisée", "Login précédent", "SPL",
+        "État", "Message", "Date",
     ]
     sheet.append(headers)
     for row, result in zip(rows, results):
         sheet.append([
             row.get("excel_row"), row.get("command"), row.get("login"),
-            row.get("pco"), row.get("brin"), result.get("search_mode"),
-            result.get("previous_login"), result.get("status_label"),
+            row.get("pco"), row.get("brin"), row.get("target_brin"),
+            result.get("search_mode"), result.get("previous_login"),
+            result.get("spl"), result.get("status_label"),
             result.get("message"), result.get("checked_at"),
         ])
 
@@ -174,7 +222,7 @@ def write_bulk_results(path: Path, rows: list[dict], results: list[dict]) -> Non
         cell.fill = fill
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = [12, 20, 20, 28, 10, 20, 22, 18, 65, 25]
+    widths = [12, 20, 20, 28, 10, 12, 20, 22, 24, 18, 65, 25]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
     path.parent.mkdir(parents=True, exist_ok=True)

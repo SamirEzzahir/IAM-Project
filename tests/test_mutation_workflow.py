@@ -72,6 +72,7 @@ from wimtech_checker import (
     odf_with_msan,
     submit_pco_location,
 )
+from wimtech_bulk_mutator import extract_spl_from_constitution
 
 
 class FakeCheckbox:
@@ -103,6 +104,14 @@ class ImmediateWait:
 
 
 class MutationWorkflowTests(unittest.TestCase):
+    def test_extracts_spl_from_old_constitution_table(self):
+        table = Mock(text="Transport > OFOF-ZO-113.16 > PCO OFOF-ZO-2711")
+        driver = FakeDriver([table])
+        self.assertEqual(
+            extract_spl_from_constitution(driver),
+            "OFOF-ZO-113.16",
+        )
+
     def test_msan_odf_fallback_rule(self):
         self.assertEqual(odf_with_msan("OFOF"), "OMSANFOF")
         self.assertEqual(odf_with_msan("OFAD33"), "OMSANFAD33")

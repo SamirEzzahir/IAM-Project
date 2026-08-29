@@ -141,7 +141,7 @@
 
         <section id="tab-bulk" class="tab">
           <article class="card panel">
-            <div class="section-heading"><span class="section-icon">▤</span><div><h2>Bulk Mutation CMD&amp;Login</h2><p>Import Excel avec Commande GPON, Login, PCO complet et brin exact.</p></div></div>
+            <div class="section-heading"><span class="section-icon">▤</span><div><h2>Bulk Mutation CMD&amp;Login</h2><p>Import Excel avec Commande GPON, Login, ODF/ZR, PCO et brin.</p></div></div>
             <div class="warning top-gap"><strong>Mutation réelle.</strong> Pour chaque ligne, l’application essaie d’abord la Commande avec le mode <strong>NNETO</strong>. Si WimTech retourne <strong>frm:ot_4</strong>, elle recommence avec le Login. Le brin demandé est muté même s’il est <strong>FIBRE-Active</strong> ; son Login actuel est enregistré avant le clic sur <strong>Muter vers (+)</strong>.</div>
             <div class="bulk-input-grid">
               <div class="field">
@@ -150,8 +150,8 @@
               </div>
               <div class="excel-columns">
                 <small>Colonnes utilisées</small>
-                <strong>Commande GPON · Login · PCO · brin</strong>
-                <span>Ex. OFOF-ZO-7122/2 → ODF OFOF · ZR OFOF-ZO</span>
+                <strong>Commande GPON · Login · ODF · PCO · brin</strong>
+                <span>Ex. OFOF-ZO + 2711 → ODF OFOF · ZR OFOF-ZO · PCO OFOF-ZO-2711</span>
               </div>
             </div>
             <div id="bulkFileMeta" class="notice top-gap">Aucun fichier sélectionné.</div>
@@ -173,14 +173,14 @@
 
           <article class="card results-card">
             <div class="result-head">
-              <div><h2>Résultats Bulk Mutation</h2><p>Le Login précédent correspond à celui affiché sur le brin avant la mutation.</p></div>
+              <div><h2>Résultats Bulk Mutation</h2><p>Le Login précédent et le SPL sont lus dans l'ancienne constitution avant la mutation.</p></div>
               <span id="bulkStatusBadge" class="badge neutral">En attente</span>
             </div>
             <div class="progress-track"><div id="bulkProgressBar"></div></div>
             <div class="results">
               <table class="bulk-table">
-                <thead><tr><th>Ligne</th><th>Commande GPON</th><th>Login</th><th>PCO</th><th>brin</th><th>Recherche</th><th>Login précédent</th><th>État</th><th>Durée</th><th>Message</th></tr></thead>
-                <tbody id="bulkResultsBody"><tr><td colspan="10" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr></tbody>
+                <thead><tr><th>Ligne</th><th>Commande GPON</th><th>Login</th><th>PCO</th><th>brin</th><th>Recherche</th><th>Login précédent</th><th>SPL</th><th>État</th><th>Durée</th><th>Message</th></tr></thead>
+                <tbody id="bulkResultsBody"><tr><td colspan="11" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr></tbody>
               </table>
             </div>
           </article>

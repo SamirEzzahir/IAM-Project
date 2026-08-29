@@ -29,6 +29,21 @@ from wimtech_checker import (
 from wimtech_parser import normalize, parse_fibre_label
 
 
+SPL_PATTERN = r"\b[A-Z0-9]+-ZO-[A-Z0-9]+(?:\.[A-Z0-9]+)+\b"
+
+
+def extract_spl_from_constitution(driver) -> str | None:
+    """Read the SPL from the existing frm:constitutionList before deletion."""
+
+    import re
+
+    tables = driver.find_elements(By.ID, "frm:constitutionList")
+    if not tables:
+        return None
+    match = re.search(SPL_PATTERN, normalize(tables[0].text))
+    return match.group(0) if match else None
+
+
 def has_command_error(driver) -> bool:
     expected = "PAS DE CIRCUIT ASSOCIE A CETTE COMMANDE OU LA COMMANDE EST DEJA MISE EN SERVICE"
     try:
@@ -40,7 +55,9 @@ def has_command_error(driver) -> bool:
     return expected in normalize(body_text(driver))
 
 
-def open_pco_form_for_bulk(driver, config: dict, command: str, login: str) -> str:
+def open_pco_form_for_bulk(
+    driver, config: dict, command: str, login: str
+) -> tuple[str, str | None]:
     """Try CMD/NNETO first, then Login only when the CMD circuit is absent."""
 
     timeout = int(config["timeout_seconds"])
@@ -67,13 +84,18 @@ def open_pco_form_for_bulk(driver, config: dict, command: str, login: str) -> st
         WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.ID, "frm:constitutionList"))
         )
+        spl = extract_spl_from_constitution(driver)
         open_add_constitution_form(driver, timeout, delete_existing=True)
-        return True
+        return spl
 
-    if command and research("NNETO", command):
-        return "CMD"
-    if login and research("Login", login):
-        return "Login"
+    if command:
+        spl = research("NNETO", command)
+        if spl is not False:
+            return "CMD", spl
+    if login:
+        spl = research("Login", login)
+        if spl is not False:
+            return "Login", spl
     if command and not login:
         raise ValueError(
             f"Commande {command} sans circuit associé et aucun Login de secours."
@@ -112,7 +134,7 @@ def find_target_fibre_action(driver, target_port: str):
 
 def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
     timeout = int(config["timeout_seconds"])
-    search_mode = open_pco_form_for_bulk(
+    search_mode, spl = open_pco_form_for_bulk(
         driver,
         config,
         row.get("command", ""),
@@ -133,6 +155,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "status_label": "PCO inexistant",
             "search_mode": search_mode,
             "previous_login": None,
+            "spl": spl,
             "odf_used": used_odf,
             "message": f"PCO introuvable : {row['pco']}.",
         }
@@ -147,12 +170,14 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "status_label": "À vérifier",
             "search_mode": search_mode,
             "previous_login": None,
+            "spl": spl,
             "odf_used": used_odf,
             "diagnostic": diagnostic,
             "message": "Aucun câble FO4/FO8-Active trouvé.",
         }
 
-    target = find_target_fibre_action(driver, row["brin"])
+    target_brin = row.get("target_brin") or row["brin"]
+    target = find_target_fibre_action(driver, target_brin)
     if not target:
         cancel_current_pco(driver, min(timeout, 8))
         return {
@@ -160,9 +185,10 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "status_label": "Brin introuvable",
             "search_mode": search_mode,
             "previous_login": None,
+            "spl": spl,
             "odf_used": used_odf,
             "cable": cable_label,
-            "message": f"Le brin {row['brin']} n’existe pas dans ce PCO.",
+            "message": f"Le brin {target_brin} n’existe pas dans ce PCO.",
         }
 
     details, fibre_label, plus_link = target
@@ -174,10 +200,11 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "status_label": "Action absente",
             "search_mode": search_mode,
             "previous_login": previous_login,
+            "spl": spl,
             "odf_used": used_odf,
             "cable": cable_label,
             "fibre_label": fibre_label,
-            "message": f"Le brin {row['brin']} n’a pas de lien Muter vers (+).",
+            "message": f"Le brin {target_brin} n’a pas de lien Muter vers (+).",
         }
 
     # Save the Login currently displayed on the target FIBRE-Active row before
@@ -205,6 +232,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "status_label": "À confirmer",
             "search_mode": search_mode,
             "previous_login": previous_login,
+            "spl": spl,
             "odf_used": used_odf,
             "cable": cable_label,
             "fibre_label": fibre_label,
@@ -228,11 +256,12 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
         "status_label": "Muté",
         "search_mode": search_mode,
         "previous_login": previous_login,
+        "spl": spl,
         "odf_used": used_odf,
         "cable": cable_label,
         "fibre_label": fibre_label,
         "message": (
-            f"{requested} muté vers {row['pco']} brin {row['brin']}."
+            f"{requested} muté vers {row['pco']} brin {target_brin}."
             f"{close_warning}"
         ),
     }
@@ -303,6 +332,7 @@ def mutate_bulk_rows(
                 "login": row["login"],
                 "pco": row["pco"],
                 "brin": row["brin"],
+                "target_brin": row.get("target_brin"),
                 "duration_seconds": round(time.monotonic() - started_at, 2),
                 "checked_at": datetime.now(timezone.utc).isoformat(),
             })

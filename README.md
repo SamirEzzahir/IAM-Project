@@ -32,22 +32,29 @@ ne pas risquer une deuxième mutation du même Login.
 ## Bulk Mutation CMD&Login
 
 L’onglet **Bulk Mutation CMD&Login** accepte un fichier `.xlsx` ou `.xlsm` et
-utilise exactement quatre colonnes :
+utilise cinq colonnes :
 
 - `Commande GPON` ;
 - `Login` ;
-- `PCO` complet ;
+- `ODF` (valeur ZR/SRO complète, par exemple `OFOF-ZO`) ;
+- `PCO` (par exemple `2711`, `2711/1` ou `2711/2`) ;
 - `brin`.
 
-Si deux colonnes portent le nom `PCO`, l’application retient automatiquement
-la valeur complète contenant le ZR. Exemple : `OFOF-ZO-7122/2` est découpé en
-`ODF = OFOF`, `ZR = OFOF-ZO`, tandis que le PCO reste inchangé.
+Exemple : `100154532 · SaLogin · OFOF-ZO · 2711 · 6`. L’application en déduit
+`ODF = OFOF`, `ZR/SRO = OFOF-ZO` et concatène le PCO complet
+`OFOF-ZO-2711`.
+
+Pour un PCO 4 FO portant le suffixe `/1` ou `/2`, les brins Excel `5`, `6`,
+`7`, `8` sont respectivement convertis en ports `1`, `2`, `3`, `4`. Les PCO
+8 FO sans suffixe conservent les brins `1` à `8` sans conversion.
 
 Pour chaque ligne, Selenium essaie la Commande avec le radio `NNETO`. Si
 `frm:ot_4` indique qu’aucun circuit n’est associé à la commande, il recommence
 avec le radio `Login`. Il ouvre ensuite le PCO exact et cible le `brin` fourni
 par Excel. Le lien **Muter vers (+)** est utilisé même si la fibre est Active ;
-le Login actuellement affiché sur cette fibre est mémorisé avant le clic.
+le Login actuellement affiché sur cette fibre est mémorisé avant le clic. Le
+SPL est également lu dans `frm:constitutionList` avant la suppression de
+l'ancienne constitution et ajouté au fichier Excel de résultats.
 
 Avant **Ajouter**, l’ancienne constitution modifiable est supprimée selon la
 séquence `case cochée` → `frm:dataTable82` → `frm:dataTable94` → motif `BSFB` →

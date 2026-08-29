@@ -270,7 +270,7 @@ function clearAssignment() {
 
 function renderBulkRows(rows) {
   if (!rows?.length) {
-    $("bulkResultsBody").innerHTML = '<tr><td colspan="10" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
+    $("bulkResultsBody").innerHTML = '<tr><td colspan="11" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
     return;
   }
   $("bulkResultsBody").innerHTML = rows.map((row) => `
@@ -282,6 +282,7 @@ function renderBulkRows(rows) {
       <td><strong>${escapeHtml(row.brin || "—")}</strong></td>
       <td>${escapeHtml(row.search_mode || "—")}</td>
       <td>${escapeHtml(row.previous_login || "—")}</td>
+      <td class="pco-code">${escapeHtml(row.spl || "—")}</td>
       <td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
@@ -406,7 +407,7 @@ function clearBulkMutation() {
 function updateBulkFileMeta() {
   const file = $("bulkFileInput").files[0];
   $("bulkFileMeta").innerHTML = file
-    ? `<strong>${escapeHtml(file.name)}</strong> · ${(file.size / 1024).toFixed(1)} Ko · colonnes requises : Commande GPON, Login, PCO, brin`
+    ? `<strong>${escapeHtml(file.name)}</strong> · ${(file.size / 1024).toFixed(1)} Ko · colonnes requises : Commande GPON, Login, ODF, PCO, brin`
     : "Aucun fichier sélectionné.";
 }
 

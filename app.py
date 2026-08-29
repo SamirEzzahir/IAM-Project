@@ -551,10 +551,12 @@ def start_bulk_mutation():
                     "login": row["login"],
                     "pco": row["pco"],
                     "brin": row["brin"],
+                    "target_brin": row.get("target_brin"),
                     "status": "PENDING",
                     "status_label": "En attente",
                     "search_mode": None,
                     "previous_login": None,
+                    "spl": None,
                     "message": row.get("validation_error") or "En attente du traitement.",
                 }
                 for row in rows
