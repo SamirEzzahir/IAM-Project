@@ -69,6 +69,7 @@ from wimtech_checker import (
     delete_old_constitution,
     find_deletable_constitution_checkboxes,
     has_invalid_odf_error,
+    has_no_available_fibre_port,
     odf_with_msan,
     submit_pco_location,
 )
@@ -104,6 +105,11 @@ class ImmediateWait:
 
 
 class MutationWorkflowTests(unittest.TestCase):
+    def test_detects_no_available_fibre_port_business_error(self):
+        message = Mock(text="pas de port disponible au niveau fibre optique {CLFI176526}")
+        driver = FakeDriver([message])
+        self.assertTrue(has_no_available_fibre_port(driver))
+
     def test_extracts_spl_from_old_constitution_table(self):
         table = Mock(text="Transport > OFOF-ZO-113.16 > PCO OFOF-ZO-2711")
         driver = FakeDriver([table])

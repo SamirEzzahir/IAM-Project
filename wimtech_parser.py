@@ -75,6 +75,19 @@ def parse_fibre_label(value: str) -> dict | None:
     }
 
 
+def build_msan_port_key(nom_usuel: str, ne: str) -> str:
+    """Build the configured MSAN lookup key from WimTech equipment values."""
+
+    name = " ".join(str(nom_usuel or "").split()).strip()
+    parts = [part.strip() for part in str(ne or "").split("-") if part.strip()]
+    if not name or len(parts) < 2:
+        raise ValueError("Nom Usuel ou valeur Ne invalide dans NumeroEquipementGPON.")
+    position = parts[:-1]  # The final component is the subscriber port.
+    if name.upper().startswith(("MH", "GH")):
+        position.insert(0, "0")
+    return f"{name}:{'-'.join(position)}"
+
+
 def is_equipment_missing(value: str) -> bool:
     return "PAS D EQUIPEMENT INSTALLE AU NIVEAU DE CETTE GEOLOCALISATION" in normalize(value)
 

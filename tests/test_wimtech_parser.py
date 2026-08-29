@@ -1,6 +1,7 @@
 import unittest
 
 from wimtech_parser import (
+    build_msan_port_key,
     base_result_confirms_existence,
     extract_available_fibre_ports,
     is_active_fo_cable,
@@ -11,6 +12,20 @@ from wimtech_parser import (
 
 
 class WimtechParserTests(unittest.TestCase):
+    def test_builds_huawei_and_nokia_msan_mapping_keys(self):
+        self.assertEqual(
+            build_msan_port_key("MHOu-Fe-Tarik2", "0-17-0-21"),
+            "MHOu-Fe-Tarik2:0-0-17-0",
+        )
+        self.assertEqual(
+            build_msan_port_key("GHI-FF-DptBensouda", "0-1-0-8"),
+            "GHI-FF-DptBensouda:0-0-1-0",
+        )
+        self.assertEqual(
+            build_msan_port_key("MNOF-LesDunnesFAD101", "1-1-15-16-27"),
+            "MNOF-LesDunnesFAD101:1-1-15-16",
+        )
+
     def test_accepts_fo4_and_fo8_active_cables(self):
         self.assertTrue(is_active_fo_cable("(FO4-Active), CLFI741050"))
         self.assertTrue(is_active_fo_cable("(FO8-Active), CLFI000001"))

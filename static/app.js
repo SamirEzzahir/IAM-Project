@@ -243,6 +243,24 @@ async function startAssignment() {
     } catch (error) { $("assignStartBtn").disabled = false; $("assignMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`; }
     return;
   }
+  const loginList = $("assignLoginsText").value.trim();
+  if (loginList) {
+    $("assignMessage").innerHTML = '<div class="notice">Recherche des ports MSAN et des SPL…</div>';
+    $("assignStartBtn").disabled = true;
+    try {
+      const data = await api("/api/assign/logins/start", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logins: loginList }),
+      });
+      currentAssignmentJobId = data.job_id; renderAssignmentJob(data.job);
+      clearInterval(assignmentPollTimer);
+      assignmentPollTimer = setInterval(pollAssignmentJob, 800); pollAssignmentJob();
+    } catch (error) {
+      $("assignStartBtn").disabled = false;
+      $("assignMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`;
+    }
+    return;
+  }
   const login = $("assignLoginInput").value.trim();
   const spl = $("assignSplInput").value.trim();
   if (!login) return toast("Saisissez le Login client.");
@@ -289,6 +307,7 @@ function clearAssignment() {
   $("assignStatusBadge").className = "badge neutral";
   $("assignMessage").innerHTML = "";
   $("assignBatchFile").value = "";
+  $("assignLoginsText").value = "";
   renderAssignmentRows([]);
   renderAssignmentLogs([]);
   $("assignStartBtn").disabled = false;

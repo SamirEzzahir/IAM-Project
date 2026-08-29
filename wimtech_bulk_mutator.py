@@ -17,6 +17,7 @@ from wimtech_checker import (
     cancel_current_pco,
     click_element,
     has_login_error,
+    has_no_available_fibre_port,
     open_add_constitution_form,
     open_active_cable,
     save_diagnostic,
@@ -25,11 +26,16 @@ from wimtech_checker import (
     submit_pco_location,
     submit_by_id,
     wait_document,
+    wait_for_action_or_port_error,
 )
 from wimtech_parser import normalize, parse_fibre_label
 
 
 SPL_PATTERN = r"\b[A-Z0-9]+-ZO-[A-Z0-9]+(?:\.[A-Z0-9]+)+\b"
+
+
+class NoPortAvailableError(Exception):
+    pass
 
 
 def extract_spl_from_constitution(driver) -> str | None:
@@ -211,18 +217,38 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
     # clicking Muter vers. Libre rows naturally produce an empty previous Login.
     try:
         click_element(driver, plus_link, timeout)
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:dataTable94"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:dataTable94"):
+            raise NoPortAvailableError
         submit_by_id(driver, "frm:dataTable94", timeout)
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:bt_va"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:bt_va"):
+            raise NoPortAvailableError
         submit_by_id(driver, "frm:bt_va", timeout)
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:v_but_ano"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:v_but_ano"):
+            raise NoPortAvailableError
+    except NoPortAvailableError:
+        return {
+            "status": "PORT_UNAVAILABLE",
+            "status_label": "Port indisponible",
+            "search_mode": search_mode,
+            "previous_login": previous_login,
+            "spl": spl,
+            "odf_used": used_odf,
+            "cable": cable_label,
+            "fibre_label": fibre_label,
+            "message": (
+                "WimTech indique : pas de port disponible au niveau fibre optique. "
+                "Passage à la ligne suivante."
+            ),
+        }
     except Exception:
+        if has_no_available_fibre_port(driver):
+            return {
+                "status": "PORT_UNAVAILABLE", "status_label": "Port indisponible",
+                "search_mode": search_mode, "previous_login": previous_login,
+                "spl": spl, "odf_used": used_odf, "cable": cable_label,
+                "fibre_label": fibre_label,
+                "message": "WimTech indique : pas de port disponible au niveau fibre optique. Passage à la ligne suivante.",
+            }
         diagnostic = save_diagnostic(
             driver,
             f"bulk_{row['excel_row']}_{row['pco']}_mutation_inconnue",

@@ -25,6 +25,7 @@ from wimtech_parser import (
     is_active_fo_cable,
     is_equipment_missing,
     normalize,
+    build_msan_port_key,
 )
 
 
@@ -138,6 +139,30 @@ def has_invalid_odf_error(driver) -> bool:
     except Exception:
         pass
     return expected in normalize(body_text(driver))
+
+
+def has_no_available_fibre_port(driver) -> bool:
+    """Detect the business error returned after mutation validation."""
+
+    expected = "PAS DE PORT DISPONIBLE AU NIVEAU FIBRE OPTIQUE"
+    try:
+        messages = driver.find_elements(By.ID, "frm:ot_1")
+        if any(expected in normalize(message.text) for message in messages):
+            return True
+    except Exception:
+        pass
+    return expected in normalize(body_text(driver))
+
+
+def wait_for_action_or_port_error(driver, timeout: int, action_id: str) -> bool:
+    """Return False for the known no-port error, True when action is ready."""
+
+    state = WebDriverWait(driver, timeout).until(
+        lambda current: "NO_PORT" if has_no_available_fibre_port(current)
+        else "READY" if current.find_elements(By.ID, action_id)
+        else False
+    )
+    return state == "READY"
 
 
 def odf_with_msan(odf: str) -> str:
@@ -281,6 +306,49 @@ def prepare_pco_form(
         timeout,
         delete_existing=delete_existing,
     )
+
+
+def extract_msan_port_from_equipment_table(driver) -> str:
+    """Extract Nom Usuel + Ne from frm:NumeroEquipementGPON."""
+
+    tables = driver.find_elements(By.ID, "frm:NumeroEquipementGPON")
+    if not tables:
+        raise ValueError("Table NumeroEquipementGPON introuvable pour ce Login.")
+    rows = tables[0].find_elements(By.CSS_SELECTOR, "tbody tr")
+    for row in rows:
+        cells = row.find_elements(By.CSS_SELECTOR, "td")
+        if len(cells) >= 6:
+            return build_msan_port_key(cells[1].text, cells[5].text)
+    raise ValueError("Aucune ligne équipement GPON exploitable pour ce Login.")
+
+
+def lookup_login_msan_port(config: dict, login: str) -> str:
+    """Search a Login and return its normalized MSAN port mapping key."""
+
+    timeout = int(config["timeout_seconds"])
+    driver = build_driver(bool(config.get("headless", False)))
+    try:
+        driver.get(config["wimtech_url"])
+        wait_document(driver, timeout)
+        select_login_mode(driver, timeout)
+        set_input(driver, "frm:in_2", login, timeout)
+        submit_by_id(driver, "frm:bt_1", timeout)
+        WebDriverWait(driver, timeout).until(
+            lambda current: has_login_error(current)
+            or bool(current.find_elements(By.ID, "frm:bt_2"))
+        )
+        if has_login_error(driver):
+            raise ValueError(f"Login {login} introuvable ou sans circuit associé.")
+        submit_by_id(driver, "frm:bt_2", timeout)
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.ID, "frm:NumeroEquipementGPON"))
+        )
+        return extract_msan_port_from_equipment_table(driver)
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 def equipment_missing(driver) -> bool:

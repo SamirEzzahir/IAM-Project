@@ -13,8 +13,8 @@
 * { box-sizing: border-box; }
 html, body { min-height: 100%; }
 body { margin: 0; background: #f5f6f8; color: var(--ink); font-family: "Segoe UI", Inter, Arial, sans-serif; }
-button, input { font-family: inherit; }
-button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid rgba(215, 25, 32, .18); outline-offset: 2px; }
+button, input, textarea { font-family: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid rgba(215, 25, 32, .18); outline-offset: 2px; }
 
 .app-shell { min-height: 100vh; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 100; display: flex; width: 244px; flex-direction: column; background: linear-gradient(180deg, #30363b, #252b30); color: #fff; box-shadow: 4px 0 18px rgba(0, 0, 0, .08); }
@@ -59,6 +59,8 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 input { width: 100%; border: 1px solid #ced4da; border-radius: 8px; padding: 10px 12px; background: #fff; color: #212529; font: inherit; transition: .18s; }
 input:hover { border-color: #adb5bd; }
 input:focus { border-color: var(--red); outline: 0; box-shadow: 0 0 0 3px rgba(215, 25, 32, .1); }
+textarea { width: 100%; resize: vertical; border: 1px solid #ced4da; border-radius: 8px; padding: 10px 12px; background: #fff; color: #212529; font: inherit; }
+textarea:focus { border-color: var(--red); outline: 0; box-shadow: 0 0 0 3px rgba(215, 25, 32, .1); }
 .input-grid { display: grid; grid-template-columns: minmax(300px, 1.5fr) minmax(120px, .45fr) minmax(190px, .75fr); gap: 14px; align-items: end; margin-top: 18px; }
 .assignment-input-grid { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(280px, 1.2fr) minmax(110px, .45fr) minmax(180px, .7fr); gap: 14px; align-items: end; margin-top: 18px; }
 .bulk-input-grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(340px, 1.2fr); gap: 14px; align-items: stretch; margin-top: 18px; }

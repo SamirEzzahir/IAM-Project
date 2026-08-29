@@ -16,13 +16,19 @@ from wimtech_checker import (
     build_driver,
     cancel_current_pco,
     click_element,
+    has_no_available_fibre_port,
     open_active_cable,
     prepare_pco_form,
     save_diagnostic,
     submit_pco_location,
     submit_by_id,
+    wait_for_action_or_port_error,
 )
 from wimtech_parser import base_result_confirms_existence, usable_fibre_port
+
+
+class NoPortAvailableError(Exception):
+    pass
 
 
 def find_first_usable_port_action(driver):
@@ -122,20 +128,36 @@ def assign_one_pco(
     port, fibre_label, plus_link = action
     try:
         click_element(driver, plus_link, timeout)
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:dataTable94"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:dataTable94"):
+            raise NoPortAvailableError
         submit_by_id(driver, "frm:dataTable94", timeout)
 
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:bt_va"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:bt_va"):
+            raise NoPortAvailableError
         submit_by_id(driver, "frm:bt_va", timeout)
 
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.ID, "frm:v_but_ano"))
-        )
+        if not wait_for_action_or_port_error(driver, timeout, "frm:v_but_ano"):
+            raise NoPortAvailableError
+    except NoPortAvailableError:
+        return {
+            "status": "SATURATED",
+            "status_label": "Port indisponible",
+            "pco_exists": True,
+            "selected_port": port,
+            "deleted_constitutions": deleted_count,
+            "odf_used": used_odf,
+            "cable": cable_label,
+            "message": "WimTech indique : pas de port disponible au niveau fibre optique.",
+        }
     except Exception:
+        if has_no_available_fibre_port(driver):
+            return {
+                "status": "SATURATED", "status_label": "Port indisponible",
+                "pco_exists": True, "selected_port": port,
+                "deleted_constitutions": deleted_count, "odf_used": used_odf,
+                "cable": cable_label,
+                "message": "WimTech indique : pas de port disponible au niveau fibre optique.",
+            }
         diagnostic = save_diagnostic(driver, f"{pco}_mutation_inconnue")
         return {
             "status": "MUTATION_UNKNOWN",

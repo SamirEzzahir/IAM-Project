@@ -29,7 +29,7 @@ from config import load_config, save_config
 from pco_logic import parse_spl
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
-from wimtech_checker import check_all_pcos
+from wimtech_checker import check_all_pcos, lookup_login_msan_port
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -244,6 +244,33 @@ def run_assignment_job(job_id: str) -> None:
             current["updated_at"] = current["finished_at"]
 
 
+def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> dict:
+    if row.get("validation_error"):
+        return {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
+    if not row.get("spl"):
+        msan_port = lookup_login_msan_port(load_config(), row["login"])
+        resolved_spl = resolve_msan_spl(MSAN_MAPPING_PATH, msan_port)
+        if not resolved_spl:
+            raise ValueError(f"Aucun SPL configuré pour le port MSAN {msan_port}.")
+        row["msan_port"], row["spl"] = msan_port, resolved_spl
+    spl_data = parse_spl(row["spl"]).to_dict()
+    detail_results = []
+    add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
+    assigned = assign_login_to_first_port(
+        config=load_config(), login=row["login"], odf=spl_data["odf"],
+        zr=spl_data["zr"], candidates=spl_data["pco_candidates"],
+        is_stopped=stop_event.is_set,
+        on_log=lambda level, message: add_log(job_id, level, message),
+        on_result=lambda _i, item: detail_results.append(item),
+    )
+    uncertain = next((item for item in detail_results if item.get("status") == "MUTATION_UNKNOWN"), None)
+    if assigned:
+        return {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
+    if uncertain:
+        return {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
+    return {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": "Aucun port utilisable trouvé."}
+
+
 def run_batch_assignment_job(job_id: str) -> None:
     with jobs_lock:
         job = jobs[job_id]
@@ -257,26 +284,11 @@ def run_batch_assignment_job(job_id: str) -> None:
             if stop_event.is_set():
                 break
             started = time.monotonic()
-            detail_results = []
-            if row.get("validation_error"):
-                result = {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
-            else:
-                spl_data = parse_spl(row["spl"]).to_dict()
-                add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
-                assigned = assign_login_to_first_port(
-                    config=load_config(), login=row["login"], odf=spl_data["odf"],
-                    zr=spl_data["zr"], candidates=spl_data["pco_candidates"],
-                    is_stopped=stop_event.is_set,
-                    on_log=lambda level, message: add_log(job_id, level, message),
-                    on_result=lambda _i, item: detail_results.append(item),
-                )
-                uncertain = next((item for item in detail_results if item.get("status") == "MUTATION_UNKNOWN"), None)
-                if assigned:
-                    result = {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
-                elif uncertain:
-                    result = {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
-                else:
-                    result = {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": "Aucun port utilisable trouvé."}
+            try:
+                result = process_batch_assignment_row(job_id, row, stop_event)
+            except Exception as exc:
+                result = {**row, "status": "ERROR", "status_label": "Erreur", "pco": None, "selected_port": None, "message": str(exc)}
+                add_log(job_id, "ERROR", f"Ligne {row['excel_row']} : {exc}")
             result["duration_seconds"] = round(time.monotonic() - started, 2)
             result["checked_at"] = utc_now()
             with jobs_lock:
@@ -583,6 +595,40 @@ def start_batch_assignment():
         }
         job["run_event"].set()
         jobs[job_id] = job
+        job["thread"] = Thread(target=run_batch_assignment_job, args=(job_id,), daemon=True)
+        job["thread"].start()
+    return jsonify(ok=True, job_id=job_id, job=public_job(job))
+
+
+@app.post("/api/assign/logins/start")
+def start_login_only_assignment():
+    payload = request.get_json(silent=True) or {}
+    logins = []
+    seen = set()
+    for value in str(payload.get("logins", "")).replace(";", "\n").replace(",", "\n").splitlines():
+        login = value.strip()
+        if login and login.upper() not in seen:
+            seen.add(login.upper())
+            logins.append(login)
+    if not logins:
+        return jsonify(ok=False, error="Saisissez au moins un Login."), 400
+    if len(logins) > 2000:
+        return jsonify(ok=False, error="La liste dépasse 2000 Logins."), 400
+    rows = [{"excel_row": index, "login": login, "spl": "", "validation_error": None} for index, login in enumerate(logins, 1)]
+    with jobs_lock:
+        active = next((value for value in jobs.values() if value["status"] in {"QUEUED", "RUNNING", "PAUSED", "STOPPING"}), None)
+        if active:
+            return jsonify(ok=False, error="Une automatisation Selenium est déjà en cours.", job_id=active["job_id"]), 409
+        job_id, now = uuid4().hex, utc_now()
+        job = {
+            "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
+            "source": "LOGIN_ONLY", "status": "QUEUED", "created_at": now,
+            "started_at": None, "finished_at": None, "updated_at": now,
+            "error": None, "total": len(rows), "completed_count": 0,
+            "results": [{**row, "status": "PENDING", "status_label": "En attente", "pco": None, "selected_port": None, "message": "Recherche du port MSAN et du SPL en attente."} for row in rows],
+            "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None,
+        }
+        job["run_event"].set(); jobs[job_id] = job
         job["thread"] = Thread(target=run_batch_assignment_job, args=(job_id,), daemon=True)
         job["thread"].start()
     return jsonify(ok=True, job_id=job_id, job=public_job(job))

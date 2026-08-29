@@ -40,6 +40,17 @@ format `.xlsx`, `.xlsm` ou `.csv`, avec les colonnes `Carte` et
 par exemple `GHI-FF-AinKadous:0-0-3-0`, remplit automatiquement son SPL avant
 l'affectation.
 
+Il est aussi possible de coller uniquement une liste de Logins, un par ligne.
+Pour chaque Login, Selenium lit `Nom Usuel` et `Ne` dans
+`frm:NumeroEquipementGPON`, supprime le dernier segment de `Ne`, puis ajoute un
+préfixe `0-` pour les équipements Huawei dont le nom commence par `MH` ou `GH`.
+La clé PORT MSAN obtenue sert à retrouver le SPL dans la correspondance importée.
+
+Si WimTech retourne `pas de port disponible au niveau fibre optique` pendant
+une validation, ce cas est enregistré comme **Port indisponible**. Il n'est pas
+considéré comme une mutation incertaine : le traitement passe au PCO ou au
+Login suivant.
+
 ## Bulk Mutation CMD&Login
 
 L’onglet **Bulk Mutation CMD&Login** accepte un fichier `.xlsx` ou `.xlsm` et
