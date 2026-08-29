@@ -314,12 +314,64 @@ def extract_msan_port_from_equipment_table(driver) -> str:
     tables = driver.find_elements(By.ID, "frm:NumeroEquipementGPON")
     if not tables:
         raise ValueError("Table NumeroEquipementGPON introuvable pour ce Login.")
-    rows = tables[0].find_elements(By.CSS_SELECTOR, "tbody tr")
-    for row in rows:
-        cells = row.find_elements(By.CSS_SELECTOR, "td")
-        if len(cells) >= 6:
-            return build_msan_port_key(cells[1].text, cells[5].text)
-    raise ValueError("Aucune ligne équipement GPON exploitable pour ce Login.")
+
+    # RichFaces can expose the table (and sometimes an empty transition row)
+    # before Selenium's rendered ``.text`` value is ready.  ``textContent``
+    # already contains the server value in that situation, so prefer it as a
+    # fallback and keep looking until a genuinely usable row is found.
+    invalid_values: list[tuple[str, str]] = []
+    for table in tables:
+        for row in table.find_elements(By.CSS_SELECTOR, "tbody tr"):
+            cells = row.find_elements(By.CSS_SELECTOR, "td")
+            if len(cells) < 6:
+                continue
+
+            def cell_text(cell) -> str:
+                rendered = " ".join(str(cell.text or "").split()).strip()
+                if rendered:
+                    return rendered
+                content = cell.get_attribute("textContent") or ""
+                return " ".join(str(content).split()).strip()
+
+            nom_usuel = cell_text(cells[1])
+            ne = cell_text(cells[5])
+            if not nom_usuel and not ne:
+                continue
+            try:
+                return build_msan_port_key(nom_usuel, ne)
+            except ValueError:
+                invalid_values.append((nom_usuel, ne))
+
+    if invalid_values:
+        nom_usuel, ne = invalid_values[-1]
+        raise ValueError(
+            "Valeurs NumeroEquipementGPON inexploitables "
+            f"(Nom Usuel={nom_usuel or '∅'}, Ne={ne or '∅'})."
+        )
+    raise ValueError(
+        "La table NumeroEquipementGPON est présente, mais ses cellules "
+        "Nom Usuel et Ne ne sont pas encore lisibles."
+    )
+
+
+def wait_for_msan_port_from_equipment_table(driver, timeout: int) -> str:
+    """Wait for RichFaces to finish populating the equipment table."""
+
+    def extract_when_ready(current):
+        try:
+            return extract_msan_port_from_equipment_table(current)
+        except (ValueError, StaleElementReferenceException):
+            return False
+
+    try:
+        return WebDriverWait(driver, timeout).until(extract_when_ready)
+    except TimeoutException as exc:
+        # Re-run once to expose the most useful table/value error instead of a
+        # generic Selenium timeout.
+        try:
+            return extract_msan_port_from_equipment_table(driver)
+        except ValueError as table_error:
+            raise table_error from exc
 
 
 def lookup_login_msan_port(config: dict, login: str) -> str:
@@ -340,10 +392,7 @@ def lookup_login_msan_port(config: dict, login: str) -> str:
         if has_login_error(driver):
             raise ValueError(f"Login {login} introuvable ou sans circuit associé.")
         submit_by_id(driver, "frm:bt_2", timeout)
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.ID, "frm:NumeroEquipementGPON"))
-        )
-        return extract_msan_port_from_equipment_table(driver)
+        return wait_for_msan_port_from_equipment_table(driver, timeout)
     finally:
         try:
             driver.quit()

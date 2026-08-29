@@ -67,6 +67,7 @@ if importlib.util.find_spec("selenium") is None:
 
 from wimtech_checker import (
     delete_old_constitution,
+    extract_msan_port_from_equipment_table,
     find_deletable_constitution_checkboxes,
     has_invalid_odf_error,
     has_no_available_fibre_port,
@@ -96,6 +97,31 @@ class FakeDriver:
         return self.elements
 
 
+class FakeCell:
+    def __init__(self, text="", text_content=None):
+        self.text = text
+        self.text_content = text if text_content is None else text_content
+
+    def get_attribute(self, name):
+        return self.text_content if name == "textContent" else None
+
+
+class FakeRow:
+    def __init__(self, cells):
+        self.cells = cells
+
+    def find_elements(self, *_args):
+        return self.cells
+
+
+class FakeTable:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find_elements(self, *_args):
+        return self.rows
+
+
 class ImmediateWait:
     def __init__(self, result=None):
         self.result = result if result is not None else object()
@@ -105,6 +131,23 @@ class ImmediateWait:
 
 
 class MutationWorkflowTests(unittest.TestCase):
+    def test_extracts_msan_values_from_text_content_after_empty_transition_row(self):
+        empty_row = FakeRow([FakeCell() for _ in range(6)])
+        populated_cells = [
+            FakeCell(text_content="MSAN2C2"),
+            FakeCell(text_content="MHOu-Fe-MourabitineERAC1--2C2"),
+            FakeCell(text_content="0"),
+            FakeCell(text_content="18"),
+            FakeCell(text_content="7"),
+            FakeCell(text_content="0-18-8-7"),
+        ]
+        driver = FakeDriver([FakeTable([empty_row, FakeRow(populated_cells)])])
+
+        self.assertEqual(
+            extract_msan_port_from_equipment_table(driver),
+            "MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8",
+        )
+
     def test_detects_no_available_fibre_port_business_error(self):
         message = Mock(text="pas de port disponible au niveau fibre optique {CLFI176526}")
         driver = FakeDriver([message])

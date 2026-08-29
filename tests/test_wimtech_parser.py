@@ -26,6 +26,15 @@ class WimtechParserTests(unittest.TestCase):
             "MNOF-LesDunnesFAD101:1-1-15-16",
         )
 
+    def test_builds_reported_double_hyphen_huawei_key(self):
+        self.assertEqual(
+            build_msan_port_key(
+                "MHOu-Fe-MourabitineERAC1--2C2",
+                "0-18-8-7",
+            ),
+            "MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8",
+        )
+
     def test_accepts_fo4_and_fo8_active_cables(self):
         self.assertTrue(is_active_fo_cable("(FO4-Active), CLFI741050"))
         self.assertTrue(is_active_fo_cable("(FO8-Active), CLFI000001"))

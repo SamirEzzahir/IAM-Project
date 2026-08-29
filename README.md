@@ -45,6 +45,12 @@ Pour chaque Login, Selenium lit `Nom Usuel` et `Ne` dans
 `frm:NumeroEquipementGPON`, supprime le dernier segment de `Ne`, puis ajoute un
 préfixe `0-` pour les équipements Huawei dont le nom commence par `MH` ou `GH`.
 La clé PORT MSAN obtenue sert à retrouver le SPL dans la correspondance importée.
+La lecture attend maintenant que RichFaces ait réellement rempli les cellules et
+utilise aussi leur `textContent`, ce qui évite les erreurs transitoires lorsque le
+tableau existe déjà mais que son texte n'est pas encore rendu par Selenium.
+
+Exemple validé : `MHOu-Fe-MourabitineERAC1--2C2` avec `Ne=0-18-8-7` produit
+`MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8`.
 
 Si WimTech retourne `pas de port disponible au niveau fibre optique` pendant
 une validation, ce cas est enregistré comme **Port indisponible**. Il n'est pas
