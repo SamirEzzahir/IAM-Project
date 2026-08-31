@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CHROME_BINARY=/usr/bin/chromium
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium chromium-driver \
+    && apt-get install -y --no-install-recommends chromium chromium-driver gosu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,10 +22,12 @@ COPY . .
 
 RUN mkdir -p /app/data /app/diagnostics \
     && useradd --create-home --uid 10001 appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && chmod +x /app/docker-entrypoint.sh
 
-USER appuser
+USER root
 
 EXPOSE 5055
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python", "app.py"]

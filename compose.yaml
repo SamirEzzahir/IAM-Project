@@ -18,3 +18,12 @@ services:
       - ./data:/app/data
       - ./diagnostics:/app/diagnostics
     shm_size: "1gb"
+
+    networks:
+      proxy:
+        aliases:
+          - fb-emm
+
+networks:
+  proxy:
+    driver: bridge

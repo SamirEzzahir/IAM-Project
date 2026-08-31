@@ -422,6 +422,12 @@ def upload_msan_mapping():
         save_msan_mapping(MSAN_MAPPING_PATH, mappings)
     except (ValueError, RuntimeError) as exc:
         return jsonify(ok=False, error=str(exc)), 400
+    except OSError:
+        app.logger.exception("Impossible d'enregistrer la correspondance MSAN")
+        return jsonify(
+            ok=False,
+            error="Impossible d'enregistrer la correspondance MSAN sur le serveur.",
+        ), 500
     return jsonify(ok=True, count=len(mappings))
 
 
