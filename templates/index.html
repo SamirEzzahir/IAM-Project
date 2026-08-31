@@ -18,11 +18,11 @@
       </div>
       <div class="sidebar-label">Navigation</div>
       <nav class="nav" aria-label="Navigation principale">
-        <button class="active" data-tab="check"><span class="nav-icon">⌕</span><span>Contrôle des PCO</span></button>
-        <button data-tab="assign"><span class="nav-icon">⇄</span><span>Affectation automatique</span></button>
-        <button data-tab="bulk"><span class="nav-icon">▤</span><span>Bulk Mutation CMD&amp;Login</span></button>
-        <button data-tab="available"><span class="nav-icon">✓</span><span>PCO disponibles</span></button>
-        <button data-tab="config"><span class="nav-icon">⚙</span><span>Configuration</span></button>
+        <a class="active" href="#tab-check" data-tab="check"><span class="nav-icon">⌕</span><span>Contrôle des PCO</span></a>
+        <a href="#tab-assign" data-tab="assign"><span class="nav-icon">⇄</span><span>Affectation automatique</span></a>
+        <a href="#tab-bulk" data-tab="bulk"><span class="nav-icon">▤</span><span>Bulk Mutation CMD&amp;Login</span></a>
+        <a href="#tab-available" data-tab="available"><span class="nav-icon">✓</span><span>PCO disponibles</span></a>
+        <a href="#tab-config" data-tab="config"><span class="nav-icon">⚙</span><span>Configuration</span></a>
       </nav>
       <div class="sidebar-foot"><span class="status-dot"></span>WimTech Automation</div>
     </aside>
@@ -231,6 +231,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='20260831-3') }}"></script>
 </body>
 </html>

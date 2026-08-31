@@ -10,6 +10,13 @@ let bulkPollTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
+// Delegate navigation at document level so the side menu remains usable even
+// if a later, feature-specific control is absent or fails during startup.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".nav [data-tab]");
+  if (link) switchTab(link.dataset.tab);
+});
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -50,7 +57,7 @@ async function api(url, options = {}) {
 
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach((element) => element.classList.remove("active"));
-  document.querySelectorAll(".nav button").forEach((element) => element.classList.toggle("active", element.dataset.tab === name));
+  document.querySelectorAll(".nav [data-tab]").forEach((element) => element.classList.toggle("active", element.dataset.tab === name));
   $(`tab-${name}`).classList.add("active");
   const headings = {
     check: ["FB EMM · Contrôle PCO", "Génération SPL et vérification des ports libres"],
@@ -629,7 +636,6 @@ async function checkServer() {
   }
 }
 
-document.querySelectorAll(".nav button").forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
 $("splInput").addEventListener("input", () => { clearTimeout(window.__splPreview); window.__splPreview = setTimeout(previewSpl, 250); });
 $("splInput").addEventListener("keydown", (event) => { if (event.key === "Enter") startCheck(); });
 $("assignSplInput").addEventListener("input", () => { clearTimeout(window.__assignSplPreview); window.__assignSplPreview = setTimeout(previewAssignmentSpl, 250); });

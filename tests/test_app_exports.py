@@ -7,6 +7,13 @@ import app
 
 
 class AppExportTests(unittest.TestCase):
+    def test_sidebar_uses_real_links_as_navigation_fallback(self):
+        response = app.app.test_client().get("/")
+        html = response.get_data(as_text=True)
+        self.assertIn('href="#tab-config" data-tab="config"', html)
+        self.assertIn('href="#tab-available" data-tab="available"', html)
+        self.assertIn("app.js?v=20260831-3", html)
+
     def test_available_csv_writes_one_line_per_free_brin(self):
         job_id = "csv-test"
         app.jobs[job_id] = {
