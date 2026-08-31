@@ -37,6 +37,7 @@ function formatDate(value) {
 }
 
 async function api(url, options = {}) {
+  options.headers = { ...(options.headers || {}), "X-Requested-With": "FB-EMM" };
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok === false) {

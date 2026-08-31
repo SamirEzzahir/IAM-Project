@@ -15,10 +15,12 @@ services:
       - 10.80.226.103
       - 10.80.226.104       # replace with your company DNS server
     dns_search:
-      - company.local   # replace with your internal DNS domain
+      - fb-emm   # replace with your internal DNS domain
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 5055
+      APP_USERNAME: ${APP_USERNAME:-fb-emm}
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD before starting Docker}
       OPEN_BROWSER: 0
       CONTAINER: 1
       FORCE_CHROME_HEADLESS: 1

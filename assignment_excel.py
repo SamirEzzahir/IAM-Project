@@ -8,6 +8,7 @@ import json
 import re
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 from openpyxl import load_workbook
 
@@ -15,6 +16,8 @@ from bulk_excel import cell_text, header_key
 from pco_logic import parse_spl
 
 MAX_ASSIGNMENT_ROWS = 2000
+MAX_MAPPING_ROWS = 10000
+MSAN_MAPPING_LOCK = Lock()
 
 
 def _excel_rows(content: bytes):
@@ -60,9 +63,15 @@ def parse_assignment_workbook(content: bytes) -> list[dict]:
 
 def parse_msan_mapping(content: bytes, suffix: str) -> list[dict]:
     if suffix.lower() == ".csv":
-        text = content.decode("utf-8-sig")
-        dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t,")
-        source = list(csv.reader(io.StringIO(text), dialect))
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Le fichier CSV doit être encodé en UTF-8.") from exc
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t,")
+            source = list(csv.reader(io.StringIO(text), dialect))
+        except csv.Error as exc:
+            raise ValueError("Le format du fichier CSV est invalide.") from exc
     else:
         source = _excel_rows(content)
     if not source:
@@ -79,6 +88,8 @@ def parse_msan_mapping(content: bytes, suffix: str) -> list[dict]:
         spl = cell_text(values[spl_index] if spl_index < len(values) else "").upper()
         if port and spl:
             mappings.append({"port": port, "spl": spl})
+            if len(mappings) > MAX_MAPPING_ROWS:
+                raise ValueError(f"Le fichier dépasse {MAX_MAPPING_ROWS} correspondances.")
     if not mappings:
         raise ValueError("Aucune correspondance Carte/SPL trouvée.")
     return mappings
@@ -86,14 +97,20 @@ def parse_msan_mapping(content: bytes, suffix: str) -> list[dict]:
 
 def save_msan_mapping(path: Path, mappings: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(mappings, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = path.with_suffix(".tmp")
+    with MSAN_MAPPING_LOCK:
+        temporary.write_text(
+            json.dumps(mappings, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        temporary.replace(path)
 
 
 def resolve_msan_spl(path: Path, port: str) -> str | None:
     if not path.exists():
         return None
     wanted = re.sub(r"\s+", "", str(port)).upper()
-    mappings = json.loads(path.read_text(encoding="utf-8"))
+    with MSAN_MAPPING_LOCK:
+        mappings = json.loads(path.read_text(encoding="utf-8"))
     for item in mappings:
         if re.sub(r"\s+", "", item.get("port", "")).upper() == wanted:
             return item.get("spl")

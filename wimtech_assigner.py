@@ -11,9 +11,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from pco_logic import group_pco_candidates
+from pco_logic import alternate_omsan_pco, group_pco_candidates
 from wimtech_checker import (
     build_driver,
+    close_driver,
     cancel_current_pco,
     click_element,
     has_no_available_fibre_port,
@@ -219,6 +220,7 @@ def assign_login_to_first_port(
                 return None
             on_log("INFO", f"Test {index + 1}/{len(candidates)} : {pco}")
             started_at = time.monotonic()
+            used_pco = pco
             try:
                 result = assign_one_pco(
                     driver,
@@ -228,6 +230,18 @@ def assign_login_to_first_port(
                     zr=zr,
                     pco=pco,
                 )
+                fallback = alternate_omsan_pco(pco)
+                if result.get("status") == "NOT_FOUND" and fallback:
+                    on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
+                    used_pco = fallback
+                    result = assign_one_pco(
+                        driver,
+                        config,
+                        login=login,
+                        odf=odf,
+                        zr=zr,
+                        pco=fallback,
+                    )
             except ValueError:
                 # A missing/invalid Login is global to the job, not a PCO
                 # condition. Let the job fail once instead of repeating the
@@ -252,7 +266,8 @@ def assign_login_to_first_port(
 
             result.update(
                 {
-                    "pco": pco,
+                    "pco": used_pco,
+                    "source_pco": pco,
                     "duration_seconds": round(time.monotonic() - started_at, 2),
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -261,7 +276,7 @@ def assign_login_to_first_port(
             level = "SUCCESS" if result["status"] == "ASSIGNED" else (
                 "ERROR" if result["status"] == "MUTATION_UNKNOWN" else "INFO"
             )
-            on_log(level, f"{pco} : {result['status_label']} - {result['message']}")
+            on_log(level, f"{used_pco} : {result['status_label']} - {result['message']}")
             return result
 
         def skip(index: int, pco: str, message: str, skipped_by: str) -> None:
@@ -296,11 +311,16 @@ def assign_login_to_first_port(
 
             if base_result_confirms_existence(base_result):
                 for offset, split_pco in enumerate((split_1, split_2), start=1):
+                    displayed_split = (
+                        alternate_omsan_pco(split_pco)
+                        if base_result.get("pco") != base
+                        else split_pco
+                    ) or split_pco
                     skip(
                         base_index + offset,
-                        split_pco,
+                        displayed_split,
                         f"{base} existe en 8 FO ; les formes /1 et /2 ne s’appliquent pas.",
-                        base,
+                        base_result["pco"],
                     )
                 continue
 
@@ -318,7 +338,9 @@ def assign_login_to_first_port(
                 break
 
         if assigned_result:
-            assigned_index = candidates.index(assigned_result["pco"])
+            assigned_index = candidates.index(
+                assigned_result.get("source_pco", assigned_result["pco"])
+            )
             for index in range(assigned_index + 1, len(candidates)):
                 # Do not overwrite split forms already skipped by the 8 FO rule.
                 skip(
@@ -331,9 +353,5 @@ def assign_login_to_first_port(
             on_log("WARNING", "Aucun port utilisable trouvé dans les PCO possibles.")
         return assigned_result
     finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        close_driver(driver)
         on_log("INFO", "Session Chrome d’affectation fermée.")

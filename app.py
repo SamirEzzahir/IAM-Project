@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import copy
 import csv
+import hmac
 import io
 import json
 import os
+import sqlite3
 import time
 import webbrowser
 from datetime import datetime, timezone
@@ -19,6 +21,7 @@ from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from bulk_excel import parse_bulk_workbook, write_bulk_results
 from assignment_excel import (
@@ -26,6 +29,7 @@ from assignment_excel import (
     save_msan_mapping,
 )
 from config import load_config, save_config
+from job_store import JobStore
 from pco_logic import parse_spl
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
@@ -36,10 +40,57 @@ BASE_DIR = Path(__file__).resolve().parent
 LATEST_RESULTS_PATH = BASE_DIR / "data" / "available_pcos.json"
 BULK_RESULTS_DIR = BASE_DIR / "data" / "bulk_results"
 MSAN_MAPPING_PATH = BASE_DIR / "data" / "msan_spl_mapping.json"
+JOB_STORE = JobStore(BASE_DIR / "data" / "jobs.sqlite3", max_jobs=20)
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 jobs: dict[str, dict] = {}
 jobs_lock = Lock()
+
+
+def authentication_enabled() -> bool:
+    return bool(os.getenv("APP_PASSWORD", ""))
+
+
+@app.before_request
+def protect_lan_access():
+    """Require shared credentials and a non-simple header in LAN mode."""
+
+    password = os.getenv("APP_PASSWORD", "")
+    if password:
+        username = os.getenv("APP_USERNAME", "fb-emm")
+        credentials = request.authorization
+        valid = bool(
+            credentials
+            and hmac.compare_digest(credentials.username or "", username)
+            and hmac.compare_digest(credentials.password or "", password)
+        )
+        if not valid:
+            return Response(
+                "Authentification requise.",
+                401,
+                {"WWW-Authenticate": 'Basic realm="FB EMM", charset="UTF-8"'},
+            )
+    if (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.path.startswith("/api/")
+        and request.headers.get("X-Requested-With") != "FB-EMM"
+    ):
+        return jsonify(ok=False, error="Requête non autorisée."), 403
+    return None
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; style-src 'self'; script-src 'self'; "
+        "img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
+    )
+    return response
 
 
 def utc_now() -> str:
@@ -107,7 +158,55 @@ def public_job(job: dict) -> dict:
 def snapshot_job(job_id: str) -> dict | None:
     with jobs_lock:
         job = jobs.get(job_id)
-        return public_job(job) if job else None
+        snapshot = public_job(job) if job else None
+    snapshot = snapshot or JOB_STORE.load(job_id)
+    if snapshot:
+        snapshot.pop("_output_path", None)
+    return snapshot
+
+
+def persist_completed_job(job_id: str) -> None:
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return
+        snapshot = public_job(job)
+        snapshot["_output_path"] = job.get("output_path")
+    try:
+        JOB_STORE.save(job_id, snapshot["kind"], snapshot["updated_at"], snapshot)
+    except (OSError, sqlite3.Error) as exc:
+        add_log(job_id, "ERROR", f"Historique local non enregistré : {exc}")
+
+
+def prune_memory_jobs() -> None:
+    """Keep active jobs and only the newest completed jobs in memory."""
+
+    with jobs_lock:
+        completed = sorted(
+            (
+                job for job in jobs.values()
+                if job.get("status") not in {"QUEUED", "RUNNING", "PAUSED", "STOPPING"}
+            ),
+            key=lambda item: item.get("updated_at", ""),
+            reverse=True,
+        )
+        for job in completed[20:]:
+            jobs.pop(job["job_id"], None)
+
+
+def prune_bulk_exports(max_files: int = 20) -> None:
+    if not BULK_RESULTS_DIR.exists():
+        return
+    files = sorted(
+        BULK_RESULTS_DIR.glob("bulk_mutation_*.xlsx"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in files[max_files:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
 
 
 def persist_available(job_id: str) -> None:
@@ -184,6 +283,8 @@ def run_job(job_id: str) -> None:
             current["updated_at"] = current["finished_at"]
     finally:
         persist_available(job_id)
+        persist_completed_job(job_id)
+        prune_memory_jobs()
 
 
 def run_assignment_job(job_id: str) -> None:
@@ -242,6 +343,9 @@ def run_assignment_job(job_id: str) -> None:
             current["error"] = str(exc)
             current["finished_at"] = utc_now()
             current["updated_at"] = current["finished_at"]
+    finally:
+        persist_completed_job(job_id)
+        prune_memory_jobs()
 
 
 def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> dict:
@@ -311,6 +415,9 @@ def run_batch_assignment_job(job_id: str) -> None:
             jobs[job_id]["status"] = "ERROR"
             jobs[job_id]["error"] = str(exc)
             jobs[job_id]["finished_at"] = utc_now()
+    finally:
+        persist_completed_job(job_id)
+        prune_memory_jobs()
 
 def run_bulk_job(job_id: str) -> None:
     with jobs_lock:
@@ -347,6 +454,7 @@ def run_bulk_job(job_id: str) -> None:
         output_path = BULK_RESULTS_DIR / f"bulk_mutation_{job_id}.xlsx"
         try:
             write_bulk_results(output_path, rows, results)
+            prune_bulk_exports()
             with jobs_lock:
                 jobs[job_id]["output_path"] = str(output_path)
         except Exception as exc:
@@ -375,11 +483,19 @@ def run_bulk_job(job_id: str) -> None:
             current["error"] = str(exc)
             current["finished_at"] = utc_now()
             current["updated_at"] = current["finished_at"]
+    finally:
+        persist_completed_job(job_id)
+        prune_memory_jobs()
 
 
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def upload_too_large(_exc):
+    return jsonify(ok=False, error="Le fichier dépasse la limite de 15 Mo."), 413
 
 
 @app.get("/api/health")
@@ -768,9 +884,14 @@ def stop_bulk_mutation(job_id: str):
 def download_bulk_result(job_id: str):
     with jobs_lock:
         job = jobs.get(job_id)
-        if not job or job.get("kind") != "BULK_MUTATION":
+        output_path = job.get("output_path") if job else None
+    if not job:
+        stored = JOB_STORE.load(job_id)
+        if not stored or stored.get("kind") != "BULK_MUTATION":
             return jsonify(ok=False, error="Traitement Bulk introuvable."), 404
-        output_path = job.get("output_path")
+        output_path = stored.get("_output_path")
+    elif job.get("kind") != "BULK_MUTATION":
+        return jsonify(ok=False, error="Traitement Bulk introuvable."), 404
     if not output_path or not Path(output_path).exists():
         return jsonify(ok=False, error="Le fichier résultat n’est pas encore disponible."), 404
     return send_file(
@@ -870,6 +991,15 @@ def export_available_csv(job_id: str):
 if __name__ == "__main__":
     host = os.getenv("APP_HOST", "127.0.0.1")
     port = int(os.getenv("APP_PORT", "5055"))
+    if host not in {"127.0.0.1", "localhost", "::1"} and not authentication_enabled():
+        raise RuntimeError(
+            "APP_PASSWORD est obligatoire lorsque l'application est exposée sur le réseau."
+        )
     if os.getenv("OPEN_BROWSER", "1").lower() in {"1", "true", "yes"}:
         Thread(target=open_dashboard, daemon=True).start()
-    app.run(host=host, port=port, debug=False, threaded=True)
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        app.run(host=host, port=port, debug=False, threaded=True)
+    else:
+        from waitress import serve
+
+        serve(app, host=host, port=port, threads=8)

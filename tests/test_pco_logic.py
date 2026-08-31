@@ -1,9 +1,43 @@
 import unittest
 
-from pco_logic import group_pco_candidates, parse_spl
+from pco_logic import alternate_omsan_pco, group_pco_candidates, parse_spl
 
 
 class ParseSplTests(unittest.TestCase):
+    def test_omsan_pcos_use_baie_card_prefix_and_have_t_alias(self):
+        result = parse_spl("OMSANFSE-ZO-121.14")
+        self.assertEqual(
+            result.pco_bases,
+            ["21.1411", "21.1412", "21.1421", "21.1422"],
+        )
+        self.assertEqual(result.pco_candidates[0], "OMSANFSE-ZO-21.1411")
+        self.assertEqual(result.pco_candidates[-1], "OMSANFSE-ZO-21.1422/2")
+        self.assertEqual(
+            alternate_omsan_pco(result.pco_candidates[0]),
+            "OMSANFSE-ZO-T.1411",
+        )
+        self.assertIsNone(alternate_omsan_pco("OFBT03-ZO-311"))
+
+    def test_four_digit_equipment_alias_generates_the_same_pcos(self):
+        regular = parse_spl("OFBT03-ZO-111.3")
+        alternate = parse_spl("OFBT03-ZO-1111.3")
+
+        self.assertEqual(alternate.spl, "OFBT03-ZO-1111.3")
+        self.assertEqual(
+            (alternate.chassis, alternate.baie, alternate.card, alternate.port),
+            (1, 1, 1, 3),
+        )
+        self.assertEqual(alternate.pco_candidates, regular.pco_candidates)
+        self.assertEqual(
+            alternate.pco_candidates,
+            [
+                "OFBT03-ZO-311", "OFBT03-ZO-311/1", "OFBT03-ZO-311/2",
+                "OFBT03-ZO-312", "OFBT03-ZO-312/1", "OFBT03-ZO-312/2",
+                "OFBT03-ZO-321", "OFBT03-ZO-321/1", "OFBT03-ZO-321/2",
+                "OFBT03-ZO-322", "OFBT03-ZO-322/1", "OFBT03-ZO-322/2",
+            ],
+        )
+
     def test_card_one_has_no_prefix(self):
         result = parse_spl("O2C1-ZO-111.5")
         self.assertEqual(result.odf, "O2C1")

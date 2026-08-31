@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from wimtech_checker import (
     body_text,
     build_driver,
+    close_driver,
     cancel_current_pco,
     click_element,
     has_login_error,
@@ -370,9 +371,5 @@ def mutate_bulk_rows(
             if result.get("halt"):
                 break
     finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        close_driver(driver)
         on_log("INFO", "Session Chrome Bulk Mutation fermée.")

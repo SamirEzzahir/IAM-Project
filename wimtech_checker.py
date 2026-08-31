@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from pco_logic import group_pco_candidates
+from pco_logic import alternate_omsan_pco, group_pco_candidates
 from wimtech_parser import (
     base_result_confirms_existence,
     extract_available_fibre_ports,
@@ -31,6 +31,7 @@ from wimtech_parser import (
 
 BASE_DIR = Path(__file__).resolve().parent
 DIAGNOSTICS_DIR = BASE_DIR / "diagnostics"
+MAX_DIAGNOSTICS = 20
 
 
 def build_driver(headless: bool = False):
@@ -38,9 +39,10 @@ def build_driver(headless: bool = False):
     chrome_binary = os.getenv("CHROME_BINARY")
     if chrome_binary:
         options.binary_location = chrome_binary
-    options.add_argument("--ignore-certificate-errors")
-    options.add_argument("--allow-insecure-localhost")
-    options.add_argument("--ignore-ssl-errors=yes")
+    if os.getenv("ALLOW_INSECURE_CERTIFICATES", "0").lower() in {"1", "true", "yes"}:
+        options.add_argument("--ignore-certificate-errors")
+        options.add_argument("--allow-insecure-localhost")
+        options.add_argument("--ignore-ssl-errors=yes")
     options.add_argument("--disable-notifications")
     options.add_argument("--start-maximized")
     force_headless = os.getenv("FORCE_CHROME_HEADLESS", "0").lower() in {
@@ -53,6 +55,17 @@ def build_driver(headless: bool = False):
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
     return webdriver.Chrome(options=options)
+
+
+def close_driver(driver) -> None:
+    """Close a workflow-owned Chrome session without masking its result."""
+
+    if driver is None:
+        return
+    try:
+        driver.quit()
+    except Exception:
+        pass
 
 
 def wait_document(driver, timeout: int) -> None:
@@ -394,10 +407,7 @@ def lookup_login_msan_port(config: dict, login: str) -> str:
         submit_by_id(driver, "frm:bt_2", timeout)
         return wait_for_msan_port_from_equipment_table(driver, timeout)
     finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        close_driver(driver)
 
 
 def equipment_missing(driver) -> bool:
@@ -515,6 +525,16 @@ def save_diagnostic(driver, pco: str) -> str:
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", pco)
     path = DIAGNOSTICS_DIR / f"{safe_name}.html"
     path.write_text(driver.page_source, encoding="utf-8", errors="replace")
+    files = sorted(
+        DIAGNOSTICS_DIR.glob("*.html"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in files[MAX_DIAGNOSTICS:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
     return str(path.relative_to(BASE_DIR))
 
 
@@ -612,8 +632,14 @@ def check_all_pcos(
                 f"Contrôle {index + 1}/{len(candidates)} : recherche Login puis PCO {pco}",
             )
             started_at = time.monotonic()
+            used_pco = pco
             try:
                 result = check_one_pco(driver, config, odf, zr, pco)
+                fallback = alternate_omsan_pco(pco)
+                if result.get("status") == "NOT_FOUND" and fallback:
+                    on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
+                    used_pco = fallback
+                    result = check_one_pco(driver, config, odf, zr, fallback)
             except TimeoutException:
                 result = {
                     "status": "ERROR",
@@ -633,7 +659,7 @@ def check_all_pcos(
 
             result.update(
                 {
-                    "pco": pco,
+                    "pco": used_pco,
                     "duration_seconds": round(time.monotonic() - started_at, 2),
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -641,7 +667,7 @@ def check_all_pcos(
             on_result(index, result)
             on_log(
                 "SUCCESS" if result["status"] == "AVAILABLE" else "INFO",
-                f"{pco} : {result['status_label']} - {result['message']}",
+                f"{used_pco} : {result['status_label']} - {result['message']}",
             )
             return result
 
@@ -656,8 +682,13 @@ def check_all_pcos(
 
             if base_result_confirms_existence(base_result):
                 for offset, split_pco in enumerate((split_1, split_2), start=1):
+                    displayed_split = (
+                        alternate_omsan_pco(split_pco)
+                        if base_result.get("pco") != base
+                        else split_pco
+                    ) or split_pco
                     skipped = {
-                        "pco": split_pco,
+                        "pco": displayed_split,
                         "status": "SKIPPED",
                         "status_label": "Ignoré",
                         "pco_exists": None,
@@ -665,9 +696,9 @@ def check_all_pcos(
                         "free_count": 0,
                         "duration_seconds": 0,
                         "checked_at": datetime.now(timezone.utc).isoformat(),
-                        "skipped_by": base,
+                        "skipped_by": base_result["pco"],
                         "message": (
-                            f"{base} existe en 8 FO : les formes /1 et /2 "
+                            f"{base_result['pco']} existe en 8 FO : les formes /1 et /2 "
                             "ne sont pas testées."
                         ),
                     }
@@ -682,9 +713,5 @@ def check_all_pcos(
                     on_log("WARNING", "Contrôle arrêté par l’utilisateur.")
                     return
     finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        close_driver(driver)
         on_log("INFO", "Session Chrome fermée.")

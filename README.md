@@ -8,6 +8,20 @@ Première fonction de l'application FB EMM :
 4. détecter et afficher les ports libres ;
 5. conserver les PCO disponibles dans `data/available_pcos.json` pour les prochaines fonctions.
 
+WimTech utilise parfois un segment équipement à quatre chiffres terminé par
+un `1`. Cette notation est acceptée comme alias de la notation habituelle :
+`OFBT03-ZO-1111.3` est interprété exactement comme `OFBT03-ZO-111.3`. Les deux
+génèrent les PCO de `OFBT03-ZO-311` à `OFBT03-ZO-322/2` selon la même règle
+8 FO / 4 FO.
+
+Les SPL dont l'ODF commence par `OMSAN` utilisent la baie et la carte comme
+préfixe PCO. Par exemple, `OMSANFSE-ZO-121.14` génère d'abord les formes de
+`OMSANFSE-ZO-21.1411` à `OMSANFSE-ZO-21.1422/2`. Pour le **Contrôle des PCO**
+et l'**Affectation automatique**, si WimTech confirme qu'une forme `21.` est
+introuvable, l'application retente uniquement cette forme avec le préfixe
+`T.`, par exemple `OMSANFSE-ZO-T.1411`. Aucun repli `T.` n'est effectué si la
+forme `21.` existe, même lorsqu'elle est saturée.
+
 ## Affectation automatique d’un Login
 
 L’onglet **Affectation automatique** reçoit un Login client et son SPL. Il
@@ -168,9 +182,41 @@ l'environnement avec `call .venv\Scripts\activate.bat`, puis de relancer
 
 ### Démarrage automatique sous Windows
 
-Il est également possible de double-cliquer sur `run.bat`. Le script crée
-l'environnement `.venv` si nécessaire, installe Flask et Selenium, démarre
-l'application, puis ouvre automatiquement `http://127.0.0.1:5055`.
+Lors de la première installation, double-cliquer sur `install.bat`. Ce script
+crée l'environnement `.venv` et installe les versions validées des
+dépendances. Il n'est pas nécessaire de le relancer à chaque démarrage.
+
+Double-cliquer ensuite sur `run.bat` pour un usage strictement local. Le
+serveur écoute uniquement sur `127.0.0.1` et ouvre automatiquement le tableau
+de bord.
+
+### Accès depuis le réseau local
+
+Double-cliquer sur `run-lan.bat` pour permettre à des collègues du même
+réseau d'utiliser l'application. Le script demande un mot de passe partagé
+sans l'afficher, puis écoute sur toutes les interfaces locales. Le nom
+d'utilisateur est `fb-emm`.
+
+Afficher l'adresse IPv4 du poste hôte avec :
+
+```bat
+ipconfig
+```
+
+Un collègue ouvre ensuite `http://ADRESSE_IP:5055`, puis saisit l'utilisateur
+`fb-emm` et le mot de passe choisi au lancement. Le pare-feu Windows doit
+autoriser le port TCP `5055` uniquement pour le profil **Privé/Domaine** et,
+si possible, uniquement pour le sous-réseau de l'entreprise. Ne jamais exposer
+ce port à Internet.
+
+Ce mode utilise Waitress plutôt que le serveur de développement Flask. Le trafic
+HTTP n'est toutefois pas chiffré : utiliser uniquement un réseau d'entreprise
+de confiance. Pour un environnement soumis à des exigences fortes, placer
+l'application derrière un proxy HTTPS géré par l'équipe informatique.
+
+Chrome et Selenium continuent de s'exécuter sur le poste qui a lancé
+`run-lan.bat`. Une seule automatisation peut s'exécuter à la fois pour tous
+les utilisateurs. Fermer la fenêtre du script arrête le service.
 
 ## Configuration
 
@@ -211,10 +257,13 @@ contrôle, à l’affectation automatique et au traitement Bulk.
 
 Si aucun câble actif n'est reconnu, la ligne apparaît **À vérifier** et la page
 HTML est enregistrée dans `diagnostics/` pour permettre un ajustement précis.
+Ces pages peuvent contenir des informations internes : elles ne doivent pas
+être partagées. Seuls les 20 diagnostics les plus récents sont conservés.
 
 ## Fichiers importants
 
 - `app.py` : API locale, tâches, pause/reprise/arrêt et exports ;
+- `job_store.py` : historique SQLite borné des 20 derniers traitements ;
 - `pco_logic.py` : génération SPL → PCO ;
 - `wimtech_checker.py` : automatisation Selenium ;
 - `wimtech_assigner.py` : affectation automatique au premier port utilisable ;
@@ -223,6 +272,7 @@ HTML est enregistrée dans `diagnostics/` pour permettre un ajustement précis.
 - `templates/index.html` : interface inspirée de Cuivre V2 ;
 - `static/app.js` : progression et résultats en direct ;
 - `data/available_pcos.json` : collection destinée aux fonctions suivantes.
+- `data/jobs.sqlite3` : historique local des traitements terminés.
 
 ## Tests de la génération PCO
 
@@ -238,6 +288,7 @@ Docker installe Chromium dans le conteneur et l'utilise automatiquement en
 mode headless. Les données et diagnostics restent disponibles sur l'hôte.
 
 ```powershell
+$env:APP_PASSWORD = "choisir-un-mot-de-passe-fort"
 docker compose up --build -d
 ```
 
@@ -264,7 +315,7 @@ Le dépôt GitHub du projet est :
 cd /opt
 sudo git clone https://github.com/SamirEzzahir/IAM-Project.git
 cd IAM-Project
-sudo docker compose up -d --build
+sudo env APP_PASSWORD='choisir-un-mot-de-passe-fort' docker compose up -d --build
 ```
 
 ### Mise à jour
@@ -275,7 +326,7 @@ Effectuer une copie de sauvegarde avant de récupérer une nouvelle version :
 ```bash
 cd /opt/IAM-Project
 git pull origin main
-sudo docker compose up -d --build --force-recreate
+sudo env APP_PASSWORD='choisir-un-mot-de-passe-fort' docker compose up -d --build --force-recreate
 ```
 
 Vérifier ensuite l'état du service et consulter ses journaux :

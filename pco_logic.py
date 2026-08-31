@@ -8,7 +8,8 @@ from dataclasses import asdict, dataclass
 
 SPL_PATTERN = re.compile(
     r"^(?P<odf>[^\s-]+)-(?P<zone>[^\s-]+)-"
-    r"(?P<chassis>\d)(?P<baie>\d)(?P<card>\d)\.(?P<port>\d{1,2})$",
+    r"(?P<chassis>\d)(?P<baie>\d)(?P<card>\d)(?P<alternate>1)?\."
+    r"(?P<port>\d{1,2})$",
     re.IGNORECASE,
 )
 
@@ -33,13 +34,18 @@ def parse_spl(value: str) -> SplResult:
     """Parse an SPL and return every possible PCO ticketing form.
 
     Example: ``OFAD33-ZO-113.16`` generates the four base positions and
-    their base, /1 and /2 forms, for a total of 12 candidates.
+    their base, /1 and /2 forms, for a total of 12 candidates. Some WimTech
+    data uses an additional trailing ``1`` in the equipment segment, such as
+    ``OFBT03-ZO-1111.3``; it is treated exactly like ``OFBT03-ZO-111.3``.
     """
 
     spl = str(value or "").strip().upper()
     match = SPL_PATTERN.fullmatch(spl)
     if not match:
-        raise ValueError("Format SPL invalide. Exemple attendu : OFAD33-ZO-113.16")
+        raise ValueError(
+            "Format SPL invalide. Exemples attendus : "
+            "OFAD33-ZO-113.16 ou OFBT03-ZO-1111.3"
+        )
 
     odf = match.group("odf")
     zone = match.group("zone")
@@ -58,7 +64,11 @@ def parse_spl(value: str) -> SplResult:
         raise ValueError("Le port GPON doit être compris entre 1 et 16.")
 
     zr = f"{odf}-{zone}"
-    prefix = "" if card == 1 else str(card)
+    # OMSAN equipment uses the baie/card prefix followed by a dot in WimTech
+    # (for example SPL 121.14 -> PCO prefix 21.14...).
+    prefix = f"{baie}{card}." if odf.startswith("OMSAN") else (
+        "" if card == 1 else str(card)
+    )
     pco_bases = [
         f"{prefix}{port}11",
         f"{prefix}{port}12",
@@ -82,6 +92,19 @@ def parse_spl(value: str) -> SplResult:
         pco_bases=pco_bases,
         pco_candidates=pco_candidates,
     )
+
+
+def alternate_omsan_pco(pco: str) -> str | None:
+    """Return WimTech's ``T.`` alias for an OMSAN baie/card PCO name."""
+
+    value = str(pco or "").strip().upper()
+    if "-" not in value:
+        return None
+    location, suffix = value.rsplit("-", 1)
+    match = re.fullmatch(r"\d{2}\.(.+)", suffix)
+    if not location.startswith("OMSAN") or not match:
+        return None
+    return f"{location}-T.{match.group(1)}"
 
 
 def group_pco_candidates(candidates: list[str]) -> list[tuple[str, str, str]]:
