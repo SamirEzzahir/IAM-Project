@@ -274,7 +274,6 @@ Effectuer une copie de sauvegarde avant de récupérer une nouvelle version :
 
 ```bash
 cd /opt/IAM-Project
-cp data/msan_spl_mapping.json /tmp/msan_spl_mapping.backup.json
 git pull origin main
 sudo docker compose up -d --build --force-recreate
 ```
