@@ -7,6 +7,13 @@ services:
     restart: unless-stopped
     ports:
       - "5055:5055"
+    dns:
+      - 10.80.226.101
+      - 10.80.226.102
+      - 10.80.226.103
+      - 10.80.226.104       # replace with your company DNS server
+    dns_search:
+      - company.local   # replace with your internal DNS domain
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 5055

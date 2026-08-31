@@ -252,4 +252,54 @@ docker compose down
 Le conteneur doit pouvoir résoudre `wimtech` et joindre le réseau interne de
 l'entreprise. En cas de VPN ou de DNS interne inaccessible depuis Docker,
 configurer le DNS ou le réseau Docker de la machine hôte.
-"# IAM-Project" 
+
+## Installation et mise à jour sur un serveur Linux
+
+Le dépôt GitHub du projet est :
+`https://github.com/SamirEzzahir/IAM-Project.git`.
+
+### Première installation
+
+```bash
+cd /opt
+sudo git clone https://github.com/SamirEzzahir/IAM-Project.git
+cd IAM-Project
+sudo docker compose up -d --build
+```
+
+### Mise à jour
+
+Le fichier `data/msan_spl_mapping.json` peut être modifié par l'application.
+Effectuer une copie de sauvegarde avant de récupérer une nouvelle version :
+
+```bash
+cd /opt/IAM-Project
+cp data/msan_spl_mapping.json /tmp/msan_spl_mapping.backup.json
+git pull origin main
+sudo docker compose up -d --build --force-recreate
+```
+
+Vérifier ensuite l'état du service et consulter ses journaux :
+
+```bash
+sudo docker compose ps
+sudo docker compose logs -f fb-emm
+```
+
+### Dépôt GitHub privé
+
+Pour un dépôt privé, il est recommandé d'utiliser une clé SSH de
+déploiement :
+
+```bash
+ssh-keygen -t ed25519 -C "iam-server"
+cat ~/.ssh/id_ed25519.pub
+```
+
+Ajouter la clé publique affichée aux *Deploy keys* du dépôt GitHub, puis
+cloner le projet avec SSH :
+
+```bash
+cd /opt
+sudo git clone git@github.com:SamirEzzahir/IAM-Project.git
+```
