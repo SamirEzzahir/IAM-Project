@@ -72,28 +72,35 @@ def collect_constitution(driver, config: dict, login: str) -> dict[str, str]:
     if has_login_error(driver):
         raise ValueError(f"Login {login} introuvable dans WimTech.")
     submit_by_id(driver, "frm:bt_2", timeout)
-    table = WebDriverWait(driver, timeout).until(lambda current: current.find_element(By.ID, "frm:constitutionList"))
-    aval = []
-    for row in table.find_elements(By.CSS_SELECTOR, "tbody tr"):
+    table = WebDriverWait(driver, timeout).until(
+        lambda current: current.find_element(By.ID, "frm:constitutionList")
+    )
+    # Keep the proven get_const.py extraction exactly: find descendant TDs,
+    # including the nested Position table.  This makes indexes 9, 1 and 8
+    # correspond to AVAL geolocation, AMONT geolocation and brin respectively.
+    tbody = table.find_element(By.TAG_NAME, "tbody")
+    aval_index = 0
+    spl = pco = brin = ""
+    for row in tbody.find_elements(By.TAG_NAME, "tr"):
         cells = row.find_elements(By.TAG_NAME, "td")
-        if len(cells) >= 10:
-            aval.append(cells)
-    if len(aval) < 2:
-        return {"constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": ""}
-    # The first AVAL row holds the SPL/SRO (cell 8).  The second AVAL row
-    # holds the current PCO (cell 8) and its nested cable position (cell 7).
-    spl_row, pco_row = aval[0], aval[1]
-    try:
-        brin = (pco_row[7].text or "").strip()
-    except Exception:
-        brin = ""
+        if len(cells) < 10:
+            continue
+        aval_index += 1
+        geo_aval = (cells[9].text or "").strip()
+        if aval_index == 1:
+            spl = geo_aval
+        elif aval_index == 2:
+            pco = geo_aval
+            spl = (cells[1].text or "").strip()
+            brin = (cells[8].text or "").strip()
+            break
     try:
         msan_port = wait_for_msan_port_from_equipment_table(driver, timeout)
     except (TimeoutException, ValueError):
         msan_port = ""
     return {
-        "constitution_spl": (spl_row[8].text or "").strip(),
-        "constitution_pco": (pco_row[8].text or "").strip(),
+        "constitution_spl": spl,
+        "constitution_pco": pco,
         "constitution_brin": brin,
         "msan_port": msan_port,
     }
