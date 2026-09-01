@@ -64,9 +64,9 @@ def parse_spl(value: str) -> SplResult:
         raise ValueError("Le port GPON doit être compris entre 1 et 16.")
 
     zr = f"{odf}-{zone}"
-    # OMSAN equipment uses the baie/card prefix followed by a dot in WimTech
-    # (for example SPL 121.14 -> PCO prefix 21.14...).
-    prefix = f"{baie}{card}." if odf.startswith("OMSAN") else (
+    # Equipment position 121 uses the baie/card prefix followed by a dot in
+    # WimTech, independently of the ODF name (121.14 -> 21.14...).
+    prefix = f"{baie}{card}." if (chassis, baie, card) == (1, 2, 1) else (
         "" if card == 1 else str(card)
     )
     pco_bases = [
@@ -94,15 +94,15 @@ def parse_spl(value: str) -> SplResult:
     )
 
 
-def alternate_omsan_pco(pco: str) -> str | None:
-    """Return WimTech's ``T.`` alias for an OMSAN baie/card PCO name."""
+def alternate_prefixed_pco(pco: str) -> str | None:
+    """Return WimTech's ``T.`` alias for a baie/card-prefixed PCO name."""
 
     value = str(pco or "").strip().upper()
     if "-" not in value:
         return None
     location, suffix = value.rsplit("-", 1)
     match = re.fullmatch(r"\d{2}\.(.+)", suffix)
-    if not location.startswith("OMSAN") or not match:
+    if not match:
         return None
     return f"{location}-T.{match.group(1)}"
 

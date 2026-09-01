@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from pco_logic import alternate_omsan_pco, group_pco_candidates
+from pco_logic import alternate_prefixed_pco, group_pco_candidates
 from wimtech_parser import (
     base_result_confirms_existence,
     extract_available_fibre_ports,
@@ -635,7 +635,7 @@ def check_all_pcos(
             used_pco = pco
             try:
                 result = check_one_pco(driver, config, odf, zr, pco)
-                fallback = alternate_omsan_pco(pco)
+                fallback = alternate_prefixed_pco(pco)
                 if result.get("status") == "NOT_FOUND" and fallback:
                     on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
                     used_pco = fallback
@@ -683,7 +683,7 @@ def check_all_pcos(
             if base_result_confirms_existence(base_result):
                 for offset, split_pco in enumerate((split_1, split_2), start=1):
                     displayed_split = (
-                        alternate_omsan_pco(split_pco)
+                        alternate_prefixed_pco(split_pco)
                         if base_result.get("pco") != base
                         else split_pco
                     ) or split_pco

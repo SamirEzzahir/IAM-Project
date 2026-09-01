@@ -43,6 +43,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .app { width: min(1500px, 100%); margin: 0 auto; padding: 26px 30px 34px; }
 .tab { display: none; }
 .tab.active { display: block; }
+.is-hidden { display: none !important; }
+.assignment-mode { display: flex; flex-wrap: wrap; gap: 10px; }
+.assignment-mode label { display: flex; align-items: center; gap: 8px; border: 1px solid #dfe3e7; border-radius: 8px; padding: 10px 13px; background: #fff; cursor: pointer; font-size: 12px; font-weight: 700; }
+.assignment-mode label:has(input:checked) { border-color: var(--red); background: #fff5f5; color: var(--red); }
+.assignment-mode-panel { margin-top: 16px; }
 .tab:target { display: block; }
 .content:has(.tab:target) .tab.active:not(:target) { display: none; }
 .card { border: 1px solid #e1e4e8; border-radius: 12px; background: #fff; box-shadow: var(--shadow); }

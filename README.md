@@ -14,13 +14,18 @@ un `1`. Cette notation est acceptée comme alias de la notation habituelle :
 génèrent les PCO de `OFBT03-ZO-311` à `OFBT03-ZO-322/2` selon la même règle
 8 FO / 4 FO.
 
-Les SPL dont l'ODF commence par `OMSAN` utilisent la baie et la carte comme
-préfixe PCO. Par exemple, `OMSANFSE-ZO-121.14` génère d'abord les formes de
+Les SPL dont la position équipement est `121` utilisent la baie et la carte
+comme préfixe PCO, quel que soit le nom de l'ODF. Par exemple,
+`OMSANFSE-ZO-121.14` génère d'abord les formes de
 `OMSANFSE-ZO-21.1411` à `OMSANFSE-ZO-21.1422/2`. Pour le **Contrôle des PCO**
 et l'**Affectation automatique**, si WimTech confirme qu'une forme `21.` est
 introuvable, l'application retente uniquement cette forme avec le préfixe
 `T.`, par exemple `OMSANFSE-ZO-T.1411`. Aucun repli `T.` n'est effectué si la
 forme `21.` existe, même lorsqu'elle est saturée.
+
+De la même manière, `OFAD33-ZO-121.1` génère les formes de
+`OFAD33-ZO-21.111` à `OFAD33-ZO-21.122/2`, avec le même repli conditionnel vers
+`OFAD33-ZO-T.111`, etc.
 
 ## Affectation automatique d’un Login
 
@@ -47,6 +52,18 @@ L'affectation peut aussi être lancée en lot avec un fichier Excel contenant
 les colonnes `Login` et `SPL`. Les lignes sont traitées l'une après l'autre avec
 exactement la même recherche des PCO et du premier brin utilisable. Une mutation
 à confirmer arrête le lot afin d'éviter toute double mutation.
+
+Les trois modes sont exclusifs et se sélectionnent avec les boutons radio :
+
+- **Login client + Numéro SPL** pour une affectation unitaire ;
+- **Affectation en lot (Excel)** pour un fichier contenant `Login` et `SPL` ;
+- **Liste de Logins uniquement** pour résoudre automatiquement le PORT MSAN et
+  le SPL à partir de la correspondance importée.
+
+Le tableau et le fichier Excel des résultats contiennent `Login`, `SPL`, `PCO`,
+`brin`, `Motif`, `Durée`, `Port MSAN` et `Message`. La colonne `Port MSAN` est
+renseignée uniquement avec le mode **Liste de Logins uniquement** ; elle reste
+vide pour les deux autres modes.
 
 Une correspondance PORT MSAN → SPL peut être importée dans **Configuration** au
 format `.xlsx`, `.xlsm` ou `.csv`, avec les colonnes `Carte` et
@@ -120,6 +137,31 @@ premier. Exemple : `OFAD33-ZO-31611`.
   PCO 4 FO : l'application contrôle alors `/1` puis `/2`.
 - En cas d'erreur technique sur la base, `/1` et `/2` sont quand même contrôlés
   car l'existence du PCO 8 FO n'a pas été confirmée.
+
+### Collection PCO disponibles
+
+Les résultats Selenium bruts restent visibles dans le contrôle, mais la
+collection réutilisable applique les règles suivantes :
+
+- lorsqu'un PCO 8 FO sans suffixe existe, `/1` et `/2` ne sont pas recherchés ;
+  la base est enregistrée avec son nom sans suffixe et chaque brin libre garde
+  son numéro d'origine de 1 à 8 ;
+- lorsque la base n'existe pas, les formes `/1` et `/2` sont contrôlées ;
+- si une seule forme existe, chaque brin libre produit une ligne disponible
+  et l'autre forme est enregistrée avec l'état **Non créé** ;
+- si la base, `/1` et `/2` sont toutes absentes, seule la base est enregistrée
+  avec l'état **Non créé** ;
+- chaque brin libre occupe une ligne distincte dans l'interface, le JSON et le
+  CSV. Par exemple, les brins 1 et 3 d'un même PCO produisent deux lignes.
+
+Le tableau **PCO disponibles** affiche `SPL`, `PCO`, le brin libre individuel,
+l'état **Disponible** ou **Non créé**, et la date du contrôle. Les téléchargements
+CSV et Excel reprennent ces mêmes informations, avec une ligne par brin libre.
+
+Après une **Affectation automatique** Login/SPL confirmée, l'application ferme
+la session de mutation, lance un contrôle complet des PCO sans nouvelle
+mutation, puis remplace `data/available_pcos.json` par cette collection mise à
+jour.
 
 ## Installation et exécution en mode développement sous Windows
 
@@ -265,6 +307,8 @@ Ces pages peuvent contenir des informations internes : elles ne doivent pas
 - `app.py` : API locale, tâches, pause/reprise/arrêt et exports ;
 - `job_store.py` : historique SQLite borné des 20 derniers traitements ;
 - `pco_logic.py` : génération SPL → PCO ;
+- `pco_catalog.py` : projection des contrôles vers les brins disponibles et
+  les PCO non créés ;
 - `wimtech_checker.py` : automatisation Selenium ;
 - `wimtech_assigner.py` : affectation automatique au premier port utilisable ;
 - `wimtech_bulk_mutator.py` : mutations Excel CMD/Login sur PCO et brin exacts ;

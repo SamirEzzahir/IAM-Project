@@ -1,6 +1,6 @@
 import unittest
 
-from pco_logic import alternate_omsan_pco, group_pco_candidates, parse_spl
+from pco_logic import alternate_prefixed_pco, group_pco_candidates, parse_spl
 
 
 class ParseSplTests(unittest.TestCase):
@@ -13,10 +13,23 @@ class ParseSplTests(unittest.TestCase):
         self.assertEqual(result.pco_candidates[0], "OMSANFSE-ZO-21.1411")
         self.assertEqual(result.pco_candidates[-1], "OMSANFSE-ZO-21.1422/2")
         self.assertEqual(
-            alternate_omsan_pco(result.pco_candidates[0]),
+            alternate_prefixed_pco(result.pco_candidates[0]),
             "OMSANFSE-ZO-T.1411",
         )
-        self.assertIsNone(alternate_omsan_pco("OFBT03-ZO-311"))
+        self.assertIsNone(alternate_prefixed_pco("OFBT03-ZO-311"))
+
+    def test_position_121_rule_is_not_limited_to_omsan_odfs(self):
+        result = parse_spl("OFAD33-ZO-121.1")
+        self.assertEqual(
+            result.pco_bases,
+            ["21.111", "21.112", "21.121", "21.122"],
+        )
+        self.assertEqual(result.pco_candidates[0], "OFAD33-ZO-21.111")
+        self.assertEqual(result.pco_candidates[-1], "OFAD33-ZO-21.122/2")
+        self.assertEqual(
+            alternate_prefixed_pco(result.pco_candidates[0]),
+            "OFAD33-ZO-T.111",
+        )
 
     def test_four_digit_equipment_alias_generates_the_same_pcos(self):
         regular = parse_spl("OFBT03-ZO-111.3")

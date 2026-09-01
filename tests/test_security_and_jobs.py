@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import app
 from job_store import JobStore
+from pco_logic import parse_spl
 
 
 def basic(username="fb-emm", password="secret"):
@@ -92,6 +93,54 @@ class JobLifecycleTests(unittest.TestCase):
             with app.jobs_lock:
                 thread = next(iter(app.jobs.values()))["thread"]
             thread.join(2)
+
+    def test_confirmed_assignment_runs_complete_availability_scan(self):
+        parsed = parse_spl("OFOF-ZO-111.1")
+        job_id = "assignment-scan-test"
+        now = app.utc_now()
+        app.jobs[job_id] = {
+            "job_id": job_id, "kind": "ASSIGNMENT", "login": "LOGIN",
+            "spl": parsed.spl, "odf": parsed.odf, "zr": parsed.zr,
+            "spl_data": parsed.to_dict(), "status": "QUEUED",
+            "created_at": now, "started_at": None, "finished_at": None,
+            "updated_at": now, "error": None,
+            "total": len(parsed.pco_candidates), "completed_count": 0,
+            "results": [
+                {"pco": pco, "status": "PENDING", "status_label": "En attente"}
+                for pco in parsed.pco_candidates
+            ],
+            "logs": [], "run_event": Event(), "stop_event": Event(),
+            "thread": None,
+        }
+
+        def assignment(**kwargs):
+            assigned = {
+                "pco": parsed.pco_candidates[0], "status": "ASSIGNED",
+                "status_label": "Affecté", "selected_port": "1",
+                "message": "ok",
+            }
+            kwargs["on_result"](0, assigned)
+            return assigned
+
+        def scan(**kwargs):
+            for index, pco in enumerate(kwargs["candidates"]):
+                kwargs["on_result"](index, {
+                    "pco": pco, "status": "NOT_FOUND",
+                    "status_label": "Introuvable", "pco_exists": False,
+                    "free_ports": [], "free_count": 0, "message": "absent",
+                    "checked_at": app.utc_now(),
+                })
+
+        with patch.object(app, "assign_login_to_first_port", side_effect=assignment), \
+                patch.object(app, "check_all_pcos", side_effect=scan) as complete_scan, \
+                patch.object(app, "persist_available"), \
+                patch.object(app, "persist_completed_job"):
+            app.run_assignment_job(job_id)
+
+        self.assertEqual(complete_scan.call_count, 1)
+        self.assertEqual(app.jobs[job_id]["status"], "COMPLETED")
+        self.assertEqual(len(app.jobs[job_id]["availability_results"]), 12)
+        self.assertEqual(len(app.public_job(app.jobs[job_id])["available_pcos"]), 4)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,13 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("fr-FR");
 }
 
+function localSplLocation(value) {
+  const match = String(value || "").trim().toUpperCase().match(
+    /^([^\s-]+)-([^\s-]+)-\d{3}(?:1)?\.\d{1,2}$/,
+  );
+  return match ? { odf: match[1], zr: `${match[1]}-${match[2]}` } : null;
+}
+
 async function api(url, options = {}) {
   options.headers = { ...(options.headers || {}), "X-Requested-With": "FB-EMM" };
   const response = await fetch(url, options);
@@ -78,6 +85,11 @@ async function previewSpl() {
     $("zrPreview").textContent = "—";
     return;
   }
+  const local = localSplLocation(spl);
+  if (local) {
+    $("odfPreview").textContent = local.odf;
+    $("zrPreview").textContent = local.zr;
+  }
   try {
     const data = await api("/api/generate-pcos", {
       method: "POST",
@@ -87,8 +99,10 @@ async function previewSpl() {
     $("odfPreview").textContent = data.odf;
     $("zrPreview").textContent = data.zr;
   } catch (_) {
-    $("odfPreview").textContent = "—";
-    $("zrPreview").textContent = "—";
+    if (!local) {
+      $("odfPreview").textContent = "—";
+      $("zrPreview").textContent = "—";
+    }
   }
 }
 
@@ -99,6 +113,11 @@ async function previewAssignmentSpl() {
     $("assignZrPreview").textContent = "—";
     return;
   }
+  const local = localSplLocation(spl);
+  if (local) {
+    $("assignOdfPreview").textContent = local.odf;
+    $("assignZrPreview").textContent = local.zr;
+  }
   try {
     const data = await api("/api/generate-pcos", {
       method: "POST",
@@ -108,13 +127,15 @@ async function previewAssignmentSpl() {
     $("assignOdfPreview").textContent = data.odf;
     $("assignZrPreview").textContent = data.zr;
   } catch (_) {
-    $("assignOdfPreview").textContent = "—";
-    $("assignZrPreview").textContent = "—";
+    if (!local) {
+      $("assignOdfPreview").textContent = "—";
+      $("assignZrPreview").textContent = "—";
+    }
   }
 }
 
 function statusClass(status) {
-  return ({ AVAILABLE: "ok", ASSIGNED: "ok", MUTATED: "ok", SATURATED: "saturated", NOT_FOUND: "missing", BRIN_NOT_FOUND: "missing", SEARCH_FAILED: "missing", INVALID: "error", NO_MUTATION_ACTION: "warning", ERROR: "error", MUTATION_UNKNOWN: "error", UNKNOWN: "warning", SKIPPED: "skipped", PENDING: "wait" })[status] || "wait";
+  return ({ AVAILABLE: "ok", ASSIGNED: "ok", MUTATED: "ok", SATURATED: "saturated", NOT_FOUND: "missing", NOT_CREATED: "missing", BRIN_NOT_FOUND: "missing", SEARCH_FAILED: "missing", INVALID: "error", NO_MUTATION_ACTION: "warning", ERROR: "error", MUTATION_UNKNOWN: "error", UNKNOWN: "warning", SKIPPED: "skipped", PENDING: "wait" })[status] || "wait";
 }
 
 function renderRows(rows) {
@@ -148,21 +169,39 @@ function renderLogs(logs) {
   $("liveLog").scrollTop = $("liveLog").scrollHeight;
 }
 
-function renderAssignmentRows(rows) {
+function renderAssignmentRows(job) {
+  const rows = job?.results || [];
   if (!rows?.length) {
-    $("assignResultsBody").innerHTML = '<tr><td colspan="6" class="empty"><strong>Aucune affectation lancée</strong><span>Saisissez le Login client et son SPL.</span></td></tr>';
+    $("assignResultsBody").innerHTML = '<tr><td colspan="9" class="empty"><strong>Aucune affectation lancée</strong><span>Sélectionnez un mode d\'affectation.</span></td></tr>';
     return;
   }
-  $("assignResultsBody").innerHTML = rows.map((row, index) => `
+  $("assignResultsBody").innerHTML = rows.map((row, index) => {
+    const login = row.login || job.login || "";
+    const spl = row.spl || job.spl || "";
+    return `
     <tr>
-      <td>${String(index + 1).padStart(2, "0")}</td>
-      <td class="pco-code">${escapeHtml(row.pco)}</td>
-      <td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
+      <td>${escapeHtml(row.excel_row || String(index + 1).padStart(2, "0"))}</td>
+      <td>${escapeHtml(login || "—")}</td>
+      <td class="pco-code">${escapeHtml(spl || "—")}</td>
+      <td class="pco-code">${escapeHtml(row.pco || "—")}</td>
       <td><strong>${escapeHtml(row.selected_port || "—")}</strong></td>
+      <td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
+      <td class="pco-code">${escapeHtml(row.msan_port || "")}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
     </tr>
-  `).join("");
+  `; }).join("");
+}
+
+function selectedAssignmentMode() {
+  return document.querySelector('input[name="assignmentMode"]:checked')?.value || "single";
+}
+
+function updateAssignmentMode() {
+  const mode = selectedAssignmentMode();
+  $("assignModeSingle").classList.toggle("is-hidden", mode !== "single");
+  $("assignModeBatch").classList.toggle("is-hidden", mode !== "batch");
+  $("assignModeLogins").classList.toggle("is-hidden", mode !== "logins");
 }
 
 function renderAssignmentLogs(logs) {
@@ -186,10 +225,12 @@ function renderAssignmentJob(job) {
     $("assignSaturatedStat").textContent = job.results.filter((row) => row.status === "NO_PORT").length;
     $("assignProgressBar").style.width = `${job.progress_percent}%`;
     $("assignStatusBadge").textContent = ({ RUNNING: "En cours", STOPPING: "Arrêt…", STOPPED: "Arrêté", COMPLETED: "Terminé", REVIEW_REQUIRED: "À confirmer", ERROR: "Erreur", QUEUED: "Préparation" })[job.status] || job.status;
-    $("assignResultsBody").innerHTML = job.results.map((row) => `<tr><td>${escapeHtml(row.excel_row)}</td><td class="pco-code">${escapeHtml(row.login)} · ${escapeHtml(row.spl)}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td><strong>${escapeHtml(row.pco ? `${row.pco} / ${row.selected_port || "—"}` : "—")}</strong></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`).join("");
+    renderAssignmentRows(job);
     renderAssignmentLogs(job.logs);
     const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
     $("assignStartBtn").disabled = active; $("assignStopBtn").disabled = !active; $("assignClearBtn").disabled = active;
+    $("assignDownloadBtn").href = active ? "#" : `/api/assign/${job.job_id}/result.xlsx`;
+    $("assignDownloadBtn").classList.toggle("disabled", active);
     if (!active) $("assignMessage").innerHTML = `<div class="${job.status === "ERROR" ? "error" : "success"}"><strong>Affectation en lot ${job.status === "COMPLETED" ? "terminée" : job.status.toLowerCase()}.</strong> ${job.completed_count} / ${job.total} ligne(s) traitée(s).</div>`;
     return;
   }
@@ -201,13 +242,15 @@ function renderAssignmentJob(job) {
   $("assignProgressBar").style.width = `${job.progress_percent}%`;
   $("assignStatusBadge").textContent = ({ RUNNING: "En cours", STOPPING: "Arrêt…", STOPPED: "Arrêté", COMPLETED: "Terminé", REVIEW_REQUIRED: "À confirmer", ERROR: "Erreur", QUEUED: "Préparation" })[job.status] || job.status;
   $("assignStatusBadge").className = `badge ${assigned ? "ok" : job.status === "REVIEW_REQUIRED" ? "error" : job.status === "ERROR" ? "error" : "neutral"}`;
-  renderAssignmentRows(job.results);
+  renderAssignmentRows(job);
   renderAssignmentLogs(job.logs);
 
   const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
   $("assignStartBtn").disabled = active;
   $("assignStopBtn").disabled = !["QUEUED", "RUNNING"].includes(job.status);
   $("assignClearBtn").disabled = active;
+  $("assignDownloadBtn").href = active ? "#" : `/api/assign/${job.job_id}/result.xlsx`;
+  $("assignDownloadBtn").classList.toggle("disabled", active);
 
   if (job.status === "COMPLETED" && assigned) {
     $("assignMessage").innerHTML = `<div class="success"><strong>Affectation terminée.</strong> Login ${escapeHtml(job.login)} affecté à <span class="pco-code">${escapeHtml(assigned.pco)}</span>, port <strong>${escapeHtml(assigned.selected_port)}</strong>.</div>`;
@@ -239,8 +282,10 @@ async function pollAssignmentJob() {
 }
 
 async function startAssignment() {
-  const batchFile = $("assignBatchFile").files[0];
-  if (batchFile) {
+  const mode = selectedAssignmentMode();
+  if (mode === "batch") {
+    const batchFile = $("assignBatchFile").files[0];
+    if (!batchFile) return toast("Sélectionnez le fichier Excel Login/SPL.");
     const formData = new FormData(); formData.append("file", batchFile);
     $("assignMessage").innerHTML = '<div class="notice">Lecture du fichier Login/SPL…</div>';
     $("assignStartBtn").disabled = true;
@@ -251,8 +296,9 @@ async function startAssignment() {
     } catch (error) { $("assignStartBtn").disabled = false; $("assignMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`; }
     return;
   }
-  const loginList = $("assignLoginsText").value.trim();
-  if (loginList) {
+  if (mode === "logins") {
+    const loginList = $("assignLoginsText").value.trim();
+    if (!loginList) return toast("Saisissez au moins un Login.");
     $("assignMessage").innerHTML = '<div class="notice">Recherche des ports MSAN et des SPL…</div>';
     $("assignStartBtn").disabled = true;
     try {
@@ -313,10 +359,12 @@ function clearAssignment() {
   $("assignProgressBar").style.width = "0%";
   $("assignStatusBadge").textContent = "En attente";
   $("assignStatusBadge").className = "badge neutral";
+  $("assignDownloadBtn").href = "#";
+  $("assignDownloadBtn").classList.add("disabled");
   $("assignMessage").innerHTML = "";
   $("assignBatchFile").value = "";
   $("assignLoginsText").value = "";
-  renderAssignmentRows([]);
+  renderAssignmentRows(null);
   renderAssignmentLogs([]);
   $("assignStartBtn").disabled = false;
   $("assignStopBtn").disabled = true;
@@ -579,16 +627,21 @@ async function loadLatestAvailable() {
   try {
     const data = await api("/api/available/latest");
     const rows = data.available_pcos || [];
+    const availableCount = rows.filter((row) => row.status === "AVAILABLE").length;
+    const notCreatedCount = rows.filter((row) => row.status === "NOT_CREATED").length;
     $("availableMeta").innerHTML = data.spl
-      ? `<strong>SPL ${escapeHtml(data.spl)}</strong> · ${rows.length} PCO disponible(s) · sauvegarde ${escapeHtml(formatDate(data.saved_at))}`
+      ? `<strong>SPL ${escapeHtml(data.spl)}</strong> · ${availableCount} brin(s) disponible(s) · ${notCreatedCount} PCO non créé(s) · sauvegarde ${escapeHtml(formatDate(data.saved_at))}`
       : "Aucun résultat disponible pour le moment.";
     $("availableBody").innerHTML = rows.length ? rows.map((row, index) => `
-      <tr><td>${String(index + 1).padStart(2, "0")}</td><td class="pco-code">${escapeHtml(row.pco)}</td><td>${escapeHtml((row.free_ports || []).join(" · ") || "—")}</td><td><strong>${Number(row.free_count || 0)}</strong></td><td>${escapeHtml(formatDate(row.checked_at))}</td></tr>
-    `).join("") : '<tr><td colspan="5" class="empty"><strong>Aucun PCO disponible</strong></td></tr>';
+      <tr><td>${String(index + 1).padStart(2, "0")}</td><td class="pco-code">${escapeHtml(data.spl || "—")}</td><td class="pco-code">${escapeHtml(row.pco)}</td><td><strong>${escapeHtml(row.brin || "—")}</strong></td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${escapeHtml(formatDate(row.checked_at))}</td></tr>
+    `).join("") : '<tr><td colspan="6" class="empty"><strong>Aucun PCO disponible</strong></td></tr>';
     const link = $("downloadCsv");
     const exportJobId = data.job_id || currentJobId;
     link.href = exportJobId && rows.length ? `/api/check/${exportJobId}/available.csv` : "#";
     link.classList.toggle("disabled", !exportJobId || !rows.length);
+    const excelLink = $("downloadAvailableExcel");
+    excelLink.href = exportJobId && rows.length ? `/api/check/${exportJobId}/available.xlsx` : "#";
+    excelLink.classList.toggle("disabled", !exportJobId || !rows.length);
   } catch (error) {
     toast(error.message);
   }
@@ -649,6 +702,8 @@ $("clearBtn").addEventListener("click", clearResults);
 $("assignStartBtn").addEventListener("click", startAssignment);
 $("assignStopBtn").addEventListener("click", stopAssignment);
 $("assignClearBtn").addEventListener("click", clearAssignment);
+document.querySelectorAll('input[name="assignmentMode"]').forEach((radio) => radio.addEventListener("change", updateAssignmentMode));
+$("assignDownloadBtn").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("resolveMsanBtn").addEventListener("click", resolveMsanPort);
 $("uploadMsanMappingBtn").addEventListener("click", uploadMsanMapping);
 $("bulkFileInput").addEventListener("change", updateBulkFileMeta);
@@ -658,6 +713,7 @@ $("bulkClearBtn").addEventListener("click", clearBulkMutation);
 $("bulkDownloadBtn").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("refreshAvailableBtn").addEventListener("click", loadLatestAvailable);
 $("downloadCsv").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
+$("downloadAvailableExcel").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("configForm").addEventListener("submit", saveConfiguration);
 
 checkServer();
@@ -665,3 +721,4 @@ loadConfig();
 loadLatestAvailable();
 previewSpl();
 previewAssignmentSpl();
+updateAssignmentMode();

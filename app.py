@@ -30,7 +30,9 @@ from assignment_excel import (
 )
 from config import load_config, save_config
 from job_store import JobStore
+from pco_catalog import build_pco_catalog
 from pco_logic import parse_spl
+from result_excel import assignment_results_excel, available_pcos_excel
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
 from wimtech_checker import check_all_pcos, lookup_login_msan_port
@@ -82,6 +84,12 @@ def protect_lan_access():
 
 @app.after_request
 def add_security_headers(response):
+    # Some Windows MIME registries classify .js as text/plain. With nosniff
+    # enabled Chrome must receive an executable JavaScript content type.
+    if request.path.endswith(".js"):
+        response.mimetype = "application/javascript"
+    elif request.path.endswith(".css"):
+        response.mimetype = "text/css"
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -90,6 +98,8 @@ def add_security_headers(response):
         "default-src 'self'; style-src 'self'; script-src 'self'; "
         "img-src 'self' data:; object-src 'none'; frame-ancestors 'none'",
     )
+    if request.path == "/" or request.path.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -118,13 +128,20 @@ def public_job(job: dict) -> dict:
         key: copy.deepcopy(value)
         for key, value in job.items()
         if key not in {
-            "thread", "run_event", "stop_event", "output_path", "bulk_rows"
+            "thread", "run_event", "stop_event", "output_path", "bulk_rows",
+            "availability_results",
         }
     }
-    safe["available_pcos"] = [
-        row for row in safe["results"] if row.get("status") == "AVAILABLE"
-    ]
-    safe["available_count"] = len(safe["available_pcos"])
+    catalog_source = job.get("availability_results")
+    if catalog_source is None and job.get("kind") == "CHECK":
+        catalog_source = job.get("results", [])
+    safe["available_pcos"] = build_pco_catalog(catalog_source or [])
+    safe["available_count"] = sum(
+        1 for row in safe["available_pcos"] if row.get("status") == "AVAILABLE"
+    )
+    safe["not_created_count"] = sum(
+        1 for row in safe["available_pcos"] if row.get("status") == "NOT_CREATED"
+    )
     safe["saturated_count"] = sum(
         1 for row in safe["results"] if row.get("status") == "SATURATED"
     )
@@ -308,8 +325,17 @@ def run_assignment_job(job_id: str) -> None:
             )
             current["updated_at"] = utc_now()
 
+    def on_availability_result(index: int, result: dict) -> None:
+        with jobs_lock:
+            current = jobs.get(job_id)
+            if not current:
+                return
+            current["availability_results"][index] = result
+            current["updated_at"] = utc_now()
+        persist_available(job_id)
+
     try:
-        assign_login_to_first_port(
+        assigned = assign_login_to_first_port(
             config=load_config(),
             login=login,
             odf=spl_data["odf"],
@@ -319,6 +345,36 @@ def run_assignment_job(job_id: str) -> None:
             on_log=lambda level, message: add_log(job_id, level, message),
             on_result=on_result,
         )
+        if assigned and not stop_event.is_set():
+            add_log(
+                job_id,
+                "INFO",
+                "Affectation confirmée. Contrôle complet des PCO pour mettre à jour la collection…",
+            )
+            with jobs_lock:
+                jobs[job_id]["availability_results"] = [
+                    {
+                        "pco": pco,
+                        "status": "PENDING",
+                        "status_label": "En attente",
+                        "pco_exists": None,
+                        "free_ports": [],
+                        "free_count": 0,
+                        "message": "En attente du contrôle après affectation.",
+                    }
+                    for pco in spl_data["pco_candidates"]
+                ]
+            check_all_pcos(
+                config=load_config(),
+                odf=spl_data["odf"],
+                zr=spl_data["zr"],
+                candidates=spl_data["pco_candidates"],
+                wait_if_paused=lambda: None,
+                is_stopped=stop_event.is_set,
+                on_log=lambda level, message: add_log(job_id, level, message),
+                on_result=on_availability_result,
+            )
+            persist_available(job_id)
         with jobs_lock:
             current = jobs[job_id]
             if any(row.get("status") == "ASSIGNED" for row in current["results"]):
@@ -344,6 +400,10 @@ def run_assignment_job(job_id: str) -> None:
             current["finished_at"] = utc_now()
             current["updated_at"] = current["finished_at"]
     finally:
+        with jobs_lock:
+            has_availability = bool(jobs.get(job_id, {}).get("availability_results"))
+        if has_availability:
+            persist_available(job_id)
         persist_completed_job(job_id)
         prune_memory_jobs()
 
@@ -764,6 +824,19 @@ def assignment_status(job_id: str):
     return jsonify(ok=True, job=job)
 
 
+@app.get("/api/assign/<job_id>/result.xlsx")
+def download_assignment_result(job_id: str):
+    job = snapshot_job(job_id)
+    if not job or job.get("kind") not in {"ASSIGNMENT", "BATCH_ASSIGNMENT"}:
+        return jsonify(ok=False, error="Affectation introuvable."), 404
+    return send_file(
+        io.BytesIO(assignment_results_excel(job)),
+        as_attachment=True,
+        download_name=f"resultats_affectation_{job_id[:8]}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.post("/api/assign/<job_id>/stop")
 def stop_assignment(job_id: str):
     with jobs_lock:
@@ -973,18 +1046,31 @@ def export_available_csv(job_id: str):
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["SPL", "ODF", "ZR", "PCO", "brin", "Date contrôle"])
+    writer.writerow(["SPL", "ODF", "ZR", "PCO", "brin", "État", "Date contrôle"])
     for row in job["available_pcos"]:
-        for brin in row.get("free_ports", []):
-            writer.writerow([
-                job["spl"], job["odf"], job["zr"], row["pco"], brin,
-                row.get("checked_at", ""),
-            ])
+        writer.writerow([
+            job["spl"], job["odf"], job["zr"], row["pco"],
+            row.get("brin") or "", row.get("status_label", ""),
+            row.get("checked_at", ""),
+        ])
 
     return Response(
         "\ufeff" + output.getvalue(),
         mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename=pco_disponibles_{job['spl']}.csv"},
+    )
+
+
+@app.get("/api/check/<job_id>/available.xlsx")
+def export_available_excel(job_id: str):
+    job = snapshot_job(job_id)
+    if not job:
+        return jsonify(ok=False, error="Contrôle introuvable."), 404
+    return send_file(
+        io.BytesIO(available_pcos_excel(job)),
+        as_attachment=True,
+        download_name=f"pco_disponibles_{job['spl']}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 

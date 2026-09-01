@@ -92,27 +92,40 @@
           <article class="card panel">
             <div class="section-heading"><span class="section-icon">⇄</span><div><h2>Affecter un Login au premier port utilisable</h2><p>Recherche automatique des PCO du SPL, sélection du premier port disponible et validation de la mutation.</p></div></div>
             <div class="warning top-gap"><strong>Action réelle WimTech.</strong> Le lancement clique automatiquement sur <strong>Muter vers (+)</strong>, puis sur les deux boutons <strong>Valider</strong> et enfin sur <strong>Fermer</strong>.</div>
-            <div class="assignment-input-grid">
-              <div class="field">
-                <label for="assignLoginInput">Login client</label>
-                <input id="assignLoginInput" type="text" placeholder="Ex. I10260472" autocomplete="off">
-              </div>
-              <div class="field">
-                <label for="assignSplInput">Numéro SPL</label>
-                <input id="assignSplInput" type="text" value="OFAD33-ZO-113.16" placeholder="Ex. OFAD33-ZO-113.16" autocomplete="off">
-              </div>
-              <div class="preview-box"><small>ODF</small><strong id="assignOdfPreview">—</strong></div>
-              <div class="preview-box"><small>Zone réseau</small><strong id="assignZrPreview">—</strong></div>
+            <div class="assignment-mode top-gap" role="radiogroup" aria-label="Mode d'affectation">
+              <label><input type="radio" name="assignmentMode" value="single" checked><span>Login client + Numéro SPL</span></label>
+              <label><input type="radio" name="assignmentMode" value="batch"><span>Affectation en lot (Excel)</span></label>
+              <label><input type="radio" name="assignmentMode" value="logins"><span>Liste de Logins uniquement</span></label>
             </div>
-            <div class="bulk-input-grid top-gap">
-              <div class="field"><label for="assignBatchFile">Affectation en lot (Excel)</label><input id="assignBatchFile" type="file" accept=".xlsx,.xlsm"><small>Colonnes : Login · SPL</small></div>
-              <div class="field"><label for="assignLoginsText">Ou liste de Logins uniquement</label><textarea id="assignLoginsText" rows="5" placeholder="Un Login par ligne&#10;I10260472&#10;I10260473"></textarea><small>Le port MSAN est lu dans WimTech, puis le SPL est trouvé dans la correspondance configurée.</small></div>
-              <div class="field"><label for="assignMsanPort">Ou rechercher le SPL par port MSAN</label><input id="assignMsanPort" type="text" placeholder="Ex. GHI-FF-AinKadous:0-0-3-0"><button id="resolveMsanBtn" class="secondary top-gap" type="button">Rechercher le SPL</button></div>
+
+            <div id="assignModeSingle" class="assignment-mode-panel">
+              <div class="assignment-input-grid">
+                <div class="field">
+                  <label for="assignLoginInput">Login client</label>
+                  <input id="assignLoginInput" type="text" placeholder="Ex. I10260472" autocomplete="off">
+                </div>
+                <div class="field">
+                  <label for="assignSplInput">Numéro SPL</label>
+                  <input id="assignSplInput" type="text" value="OFAD33-ZO-113.16" placeholder="Ex. OFAD33-ZO-113.16" autocomplete="off">
+                </div>
+                <div class="preview-box"><small>ODF</small><strong id="assignOdfPreview">—</strong></div>
+                <div class="preview-box"><small>Zone réseau</small><strong id="assignZrPreview">—</strong></div>
+              </div>
+              <div class="field top-gap"><label for="assignMsanPort">Rechercher le SPL par port MSAN</label><input id="assignMsanPort" type="text" placeholder="Ex. GHI-FF-AinKadous:0-0-3-0"><button id="resolveMsanBtn" class="secondary top-gap" type="button">Rechercher le SPL</button></div>
+            </div>
+
+            <div id="assignModeBatch" class="assignment-mode-panel is-hidden">
+              <div class="field"><label for="assignBatchFile">Fichier Excel</label><input id="assignBatchFile" type="file" accept=".xlsx,.xlsm"><small>Colonnes : Login · SPL</small></div>
+            </div>
+
+            <div id="assignModeLogins" class="assignment-mode-panel is-hidden">
+              <div class="field"><label for="assignLoginsText">Liste de Logins uniquement</label><textarea id="assignLoginsText" rows="7" placeholder="Un Login par ligne&#10;I10260472&#10;I10260473"></textarea><small>Le port MSAN est lu dans WimTech, puis le SPL est trouvé dans la correspondance configurée.</small></div>
             </div>
             <div class="actions">
               <button id="assignStartBtn" class="primary" type="button">⇄ Affecter le premier port</button>
               <button id="assignStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button>
               <button id="assignClearBtn" class="secondary" type="button">↻ Effacer</button>
+              <a id="assignDownloadBtn" class="secondary button-link disabled" href="#">↓ Télécharger résultats Excel</a>
             </div>
             <div id="assignMessage" class="message-slot"></div>
           </article>
@@ -132,8 +145,8 @@
             <div class="progress-track"><div id="assignProgressBar"></div></div>
             <div class="results">
               <table>
-                <thead><tr><th>#</th><th>PCO testé</th><th>Motif</th><th>Port retenu</th><th>Durée</th><th>Message</th></tr></thead>
-                <tbody id="assignResultsBody"><tr><td colspan="6" class="empty"><strong>Aucune affectation lancée</strong><span>Saisissez le Login client et son SPL.</span></td></tr></tbody>
+                <thead><tr><th>#</th><th>Login</th><th>SPL</th><th>PCO</th><th>brin</th><th>Motif</th><th>Durée</th><th>Port MSAN</th><th>Message</th></tr></thead>
+                <tbody id="assignResultsBody"><tr><td colspan="9" class="empty"><strong>Aucune affectation lancée</strong><span>Sélectionnez un mode d'affectation.</span></td></tr></tbody>
               </table>
             </div>
           </article>
@@ -200,11 +213,11 @@
           <article class="card panel">
             <div class="section-heading"><span class="section-icon">✓</span><div><h2>PCO disponibles</h2><p>Cette collection est réutilisable par les prochaines fonctions EMM.</p></div></div>
             <div id="availableMeta" class="notice top-gap">Aucun résultat disponible pour le moment.</div>
-            <div class="actions"><a id="downloadCsv" class="primary button-link disabled" href="#">↓ Télécharger CSV</a><button id="refreshAvailableBtn" class="secondary" type="button">↻ Actualiser</button></div>
+            <div class="actions"><a id="downloadCsv" class="primary button-link disabled" href="#">↓ Télécharger CSV</a><a id="downloadAvailableExcel" class="secondary button-link disabled" href="#">↓ Télécharger Excel</a><button id="refreshAvailableBtn" class="secondary" type="button">↻ Actualiser</button></div>
             <div class="results top-gap">
               <table>
-                <thead><tr><th>#</th><th>PCO disponible</th><th>Ports libres</th><th>Nombre libre</th><th>Date du contrôle</th></tr></thead>
-                <tbody id="availableBody"><tr><td colspan="5" class="empty"><strong>Aucun PCO disponible</strong></td></tr></tbody>
+                <thead><tr><th>#</th><th>SPL</th><th>PCO</th><th>Brin libre</th><th>État</th><th>Date du contrôle</th></tr></thead>
+                <tbody id="availableBody"><tr><td colspan="6" class="empty"><strong>Aucun PCO disponible</strong></td></tr></tbody>
               </table>
             </div>
           </article>
@@ -231,6 +244,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="{{ url_for('static', filename='app.js', v='20260831-3') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='20260901-2') }}"></script>
 </body>
 </html>
