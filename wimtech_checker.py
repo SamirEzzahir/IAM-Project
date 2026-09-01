@@ -34,12 +34,12 @@ DIAGNOSTICS_DIR = BASE_DIR / "diagnostics"
 MAX_DIAGNOSTICS = 20
 
 
-def build_driver(headless: bool = False):
+def build_driver(headless: bool = False, *, ignore_certificate_errors: bool = False):
     options = webdriver.ChromeOptions()
     chrome_binary = os.getenv("CHROME_BINARY")
     if chrome_binary:
         options.binary_location = chrome_binary
-    if os.getenv("ALLOW_INSECURE_CERTIFICATES", "0").lower() in {"1", "true", "yes"}:
+    if ignore_certificate_errors or os.getenv("ALLOW_INSECURE_CERTIFICATES", "0").lower() in {"1", "true", "yes"}:
         options.add_argument("--ignore-certificate-errors")
         options.add_argument("--allow-insecure-localhost")
         options.add_argument("--ignore-ssl-errors=yes")

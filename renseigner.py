@@ -76,7 +76,11 @@ def collect_constitution(driver, config: dict, login: str) -> dict[str, str]:
 
 
 def run_renseigner(*, config: dict, rows: list[dict], degroupage: dict, stopped: Callable[[], bool], on_result: Callable[[int, dict], None], on_log: Callable[[str, str], None]) -> None:
-    driver = build_driver(bool(config.get("headless", False)))
+    # WIAM may use an internal certificate that is not trusted by Chrome.
+    driver = build_driver(
+        bool(config.get("headless", False)),
+        ignore_certificate_errors=True,
+    )
     try:
         for index, row in enumerate(rows):
             if stopped(): break
