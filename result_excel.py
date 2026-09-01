@@ -64,7 +64,7 @@ def available_pcos_excel(job: dict) -> bytes:
 
 def renseigner_results_excel(job: dict) -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "Renseigner PCOs"
-    sheet.append(["#", "Entrée", "Login", "Source", "SPL/SRO", "PCO", "brin", "Port (Nom Usuel + NE)", "État", "Durée (s)", "Message"])
+    sheet.append(["#", "Entrée", "Login", "Source Login", "Type recherche constitution", "SPL/SRO", "PCO", "brin", "Port (Nom Usuel + NE)", "État", "Durée (s)", "Message"])
     for row in job.get("results", []):
-        sheet.append([row.get("excel_row"), row.get("input"), row.get("login"), row.get("source"), row.get("constitution_spl"), row.get("constitution_pco"), row.get("constitution_brin"), row.get("msan_port"), row.get("status_label"), row.get("duration_seconds"), row.get("message")])
-    return _finish(workbook, [8, 22, 22, 22, 28, 30, 12, 35, 18, 14, 60])
+        sheet.append([row.get("excel_row"), row.get("input"), row.get("login"), row.get("source"), row.get("constitution_search_mode"), row.get("constitution_spl"), row.get("constitution_pco"), row.get("constitution_brin"), row.get("msan_port"), row.get("status_label"), row.get("duration_seconds"), row.get("message")])
+    return _finish(workbook, [8, 22, 22, 22, 25, 28, 30, 12, 35, 18, 14, 60])

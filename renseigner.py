@@ -13,6 +13,7 @@ from wimtech_checker import (
     build_driver, close_driver, has_login_error, select_search_mode, set_input,
     submit_by_id, wait_document, wait_for_msan_port_from_equipment_table,
 )
+from wimtech_bulk_mutator import ensure_in_progress_circuit_selected, has_command_error
 
 
 def _wiam_login(driver, config: dict, timeout: int) -> None:
@@ -61,16 +62,37 @@ def collect_wiam_login(driver, config: dict, command: str) -> str:
     return cells[1].text.strip()
 
 
-def collect_constitution(driver, config: dict, login: str) -> dict[str, str]:
+def collect_constitution(
+    driver, config: dict, login: str, command: str | None = None
+) -> dict[str, str]:
     timeout = int(config["timeout_seconds"])
-    driver.get(config["wimtech_url"])
-    wait_document(driver, timeout)
-    select_search_mode(driver, timeout, "Login")
-    set_input(driver, "frm:in_2", login, timeout)
-    submit_by_id(driver, "frm:bt_1", timeout)
-    WebDriverWait(driver, timeout).until(lambda current: has_login_error(current) or current.find_elements(By.ID, "frm:bt_2"))
-    if has_login_error(driver):
-        raise ValueError(f"Login {login} introuvable dans WimTech.")
+
+    def search(mode: str, value: str) -> bool:
+        driver.get(config["wimtech_url"])
+        wait_document(driver, timeout)
+        select_search_mode(driver, timeout, mode)
+        set_input(driver, "frm:in_2", value, timeout)
+        submit_by_id(driver, "frm:bt_1", timeout)
+        WebDriverWait(driver, timeout).until(
+            lambda current: has_login_error(current)
+            or has_command_error(current)
+            or current.find_elements(By.ID, "frm:bt_2")
+        )
+        if mode == "Login" and has_login_error(driver):
+            return False
+        if mode == "NNETO" and has_command_error(driver):
+            return False
+        ensure_in_progress_circuit_selected(driver, timeout)
+        return bool(driver.find_elements(By.ID, "frm:bt_2"))
+
+    search_mode = "Login"
+    if not search("Login", login):
+        if not command or not search("NNETO", command):
+            raise ValueError(
+                f"Aucun circuit trouvé par Login {login}"
+                + (f" ni par CMD {command}." if command else ".")
+            )
+        search_mode = "CMD"
     submit_by_id(driver, "frm:bt_2", timeout)
     table = WebDriverWait(driver, timeout).until(
         lambda current: current.find_element(By.ID, "frm:constitutionList")
@@ -103,6 +125,7 @@ def collect_constitution(driver, config: dict, login: str) -> dict[str, str]:
         "constitution_pco": pco,
         "constitution_brin": brin,
         "msan_port": msan_port,
+        "constitution_search_mode": search_mode,
     }
 
 
@@ -116,7 +139,7 @@ def run_renseigner(*, config: dict, rows: list[dict], degroupage: dict, stopped:
         for index, row in enumerate(rows):
             if stopped(): break
             started = time.monotonic()
-            result = {**row, "login": row.get("login", ""), "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": ""}
+            result = {**row, "login": row.get("login", ""), "source": "", "constitution_search_mode": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": ""}
             try:
                 if row["mode"] in {"CMD", "BOTH"}:
                     command = row["input"].upper()
@@ -129,7 +152,8 @@ def run_renseigner(*, config: dict, rows: list[dict], degroupage: dict, stopped:
                 if row["mode"] in {"LOGIN", "BOTH"}:
                     login = row["input"] if row["mode"] == "LOGIN" else result["login"]
                     result["login"] = login
-                    result.update(collect_constitution(driver, config, login))
+                    command = row["input"] if row["mode"] == "BOTH" else None
+                    result.update(collect_constitution(driver, config, login, command))
                 result.update(status="COMPLETED", status_label="Terminé", message="Collecte terminée.")
             except Exception as exc:
                 result.update(status="ERROR", status_label="Erreur", message=str(exc))
