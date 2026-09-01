@@ -782,6 +782,20 @@ def start_batch_assignment():
     return jsonify(ok=True, job_id=job_id, job=public_job(job))
 
 
+@app.post("/api/assign/batch/preview")
+def preview_batch_assignment():
+    """Parse an assignment workbook without starting Selenium."""
+
+    uploaded = request.files.get("file")
+    if not uploaded or Path(uploaded.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
+        return jsonify(ok=False, error="Sélectionnez un fichier Excel .xlsx ou .xlsm avec Login et SPL."), 400
+    try:
+        rows = parse_assignment_workbook(uploaded.stream.read(15 * 1024 * 1024 + 1))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    return jsonify(ok=True, rows=rows)
+
+
 @app.post("/api/assign/logins/start")
 def start_login_only_assignment():
     payload = request.get_json(silent=True) or {}
@@ -929,6 +943,26 @@ def start_bulk_mutation():
         thread.start()
 
     return jsonify(ok=True, job_id=job_id, job=public_job(job))
+
+
+@app.post("/api/bulk/preview")
+def preview_bulk_mutation():
+    """Parse a bulk workbook without creating or running a job."""
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify(ok=False, error="Sélectionnez un fichier Excel .xlsx ou .xlsm."), 400
+    filename = Path(uploaded.filename).name
+    if Path(filename).suffix.lower() not in {".xlsx", ".xlsm"}:
+        return jsonify(ok=False, error="Format accepté : .xlsx ou .xlsm."), 400
+    content = uploaded.stream.read(15 * 1024 * 1024 + 1)
+    if len(content) > 15 * 1024 * 1024:
+        return jsonify(ok=False, error="Le fichier Excel dépasse 15 Mo."), 400
+    try:
+        rows = parse_bulk_workbook(content)
+    except (ValueError, RuntimeError) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    return jsonify(ok=True, rows=rows)
 
 
 @app.get("/api/bulk/<job_id>")

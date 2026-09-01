@@ -338,6 +338,33 @@ async function startAssignment() {
   }
 }
 
+async function previewAssignmentBatchFile() {
+  const file = $("assignBatchFile").files[0];
+  if (!file) {
+    renderAssignmentRows(null);
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  $("assignMessage").innerHTML = '<div class="notice">Lecture de l’aperçu Excel…</div>';
+  try {
+    const data = await api("/api/assign/batch/preview", { method: "POST", body: formData });
+    const rows = data.rows.map((row) => ({
+      ...row,
+      pco: null,
+      selected_port: null,
+      status: row.validation_error ? "INVALID" : "PENDING",
+      status_label: row.validation_error ? "Ligne invalide" : "Prêt à lancer",
+      message: row.validation_error || "Aperçu : aucune action lancée.",
+    }));
+    renderAssignmentRows({ results: rows });
+    $("assignMessage").innerHTML = `<div class="notice"><strong>Aperçu prêt.</strong> ${rows.length} ligne(s) lue(s) ; aucune automatisation n’a été lancée.</div>`;
+  } catch (error) {
+    renderAssignmentRows(null);
+    $("assignMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function stopAssignment() {
   if (!currentAssignmentJobId) return;
   try {
@@ -528,6 +555,41 @@ function updateBulkFileMeta() {
     : "Aucun fichier sélectionné.";
 }
 
+async function previewBulkFile() {
+  updateBulkFileMeta();
+  const file = $("bulkFileInput").files[0];
+  if (!file) {
+    renderBulkRows([]);
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  $("bulkMessage").innerHTML = '<div class="notice">Lecture de l’aperçu Excel…</div>';
+  try {
+    const data = await api("/api/bulk/preview", { method: "POST", body: formData });
+    const rows = data.rows.map((row) => ({
+      ...row,
+      status: row.validation_error ? "INVALID" : "PENDING",
+      status_label: row.validation_error ? "Ligne invalide" : "Prêt à lancer",
+      search_mode: null,
+      previous_login: null,
+      spl: null,
+      msan_port: null,
+      message: row.validation_error || "Aperçu : aucune mutation lancée.",
+    }));
+    renderBulkRows(rows);
+    $("bulkTotalStat").textContent = rows.length;
+    $("bulkSuccessStat").textContent = "0";
+    $("bulkFailedStat").textContent = rows.filter((row) => row.validation_error).length;
+    $("bulkProgressStat").textContent = `0 / ${rows.length}`;
+    $("bulkProgressBar").style.width = "0%";
+    $("bulkMessage").innerHTML = `<div class="notice"><strong>Aperçu prêt.</strong> ${rows.length} ligne(s) lue(s) ; aucune mutation n’a été lancée.</div>`;
+  } catch (error) {
+    renderBulkRows([]);
+    $("bulkMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`;
+  }
+}
+
 function renderJob(job) {
   currentJob = job;
   $("totalStat").textContent = job.total;
@@ -707,7 +769,8 @@ document.querySelectorAll('input[name="assignmentMode"]').forEach((radio) => rad
 $("assignDownloadBtn").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("resolveMsanBtn").addEventListener("click", resolveMsanPort);
 $("uploadMsanMappingBtn").addEventListener("click", uploadMsanMapping);
-$("bulkFileInput").addEventListener("change", updateBulkFileMeta);
+$("assignBatchFile").addEventListener("change", previewAssignmentBatchFile);
+$("bulkFileInput").addEventListener("change", previewBulkFile);
 $("bulkStartBtn").addEventListener("click", startBulkMutation);
 $("bulkStopBtn").addEventListener("click", stopBulkMutation);
 $("bulkClearBtn").addEventListener("click", clearBulkMutation);
