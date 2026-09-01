@@ -386,7 +386,7 @@ async function uploadMsanMapping() {
 
 function renderBulkRows(rows) {
   if (!rows?.length) {
-    $("bulkResultsBody").innerHTML = '<tr><td colspan="11" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
+    $("bulkResultsBody").innerHTML = '<tr><td colspan="12" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
     return;
   }
   $("bulkResultsBody").innerHTML = rows.map((row) => `
@@ -400,6 +400,7 @@ function renderBulkRows(rows) {
       <td>${escapeHtml(row.previous_login || "—")}</td>
       <td class="pco-code">${escapeHtml(row.spl || "—")}</td>
       <td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
+      <td class="pco-code">${escapeHtml(row.msan_port || "—")}</td>
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
     </tr>

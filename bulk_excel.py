@@ -204,7 +204,7 @@ def write_bulk_results(path: Path, rows: list[dict], results: list[dict]) -> Non
     headers = [
         "Ligne Excel", "Commande GPON", "Login demandé", "PCO", "brin",
         "Brin utilisé", "Recherche utilisée", "Login précédent", "SPL",
-        "État", "Message", "Date",
+        "État", "Port (Nom Usuel + NE)", "Message", "Date",
     ]
     sheet.append(headers)
     for row, result in zip(rows, results):
@@ -212,7 +212,7 @@ def write_bulk_results(path: Path, rows: list[dict], results: list[dict]) -> Non
             row.get("excel_row"), row.get("command"), row.get("login"),
             row.get("pco"), row.get("brin"), row.get("target_brin"),
             result.get("search_mode"), result.get("previous_login"),
-            result.get("spl"), result.get("status_label"),
+            result.get("spl"), result.get("status_label"), result.get("msan_port"),
             result.get("message"), result.get("checked_at"),
         ])
 
@@ -222,7 +222,7 @@ def write_bulk_results(path: Path, rows: list[dict], results: list[dict]) -> Non
         cell.fill = fill
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = [12, 20, 20, 28, 10, 12, 20, 22, 24, 18, 65, 25]
+    widths = [12, 20, 20, 28, 10, 12, 20, 22, 24, 28, 65, 25]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
     path.parent.mkdir(parents=True, exist_ok=True)

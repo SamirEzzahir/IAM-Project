@@ -28,6 +28,7 @@ from wimtech_checker import (
     submit_pco_location,
     submit_by_id,
     wait_document,
+    wait_for_msan_port_from_equipment_table,
     wait_reload,
     wait_for_action_or_port_error,
 )
@@ -105,12 +106,12 @@ def has_command_error(driver) -> bool:
 
 def open_pco_form_for_bulk(
     driver, config: dict, command: str, login: str
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str | None]:
     """Try CMD/NNETO first, then Login only when the CMD circuit is absent."""
 
     timeout = int(config["timeout_seconds"])
 
-    def research(mode: str, value: str) -> bool:
+    def research(mode: str, value: str) -> tuple[str | None, str | None] | bool:
         driver.get(config["wimtech_url"])
         wait_document(driver, timeout)
         select_search_mode(driver, timeout, mode)
@@ -134,17 +135,24 @@ def open_pco_form_for_bulk(
             EC.presence_of_element_located((By.ID, "frm:constitutionList"))
         )
         spl = extract_spl_from_constitution(driver)
+        # Read the upstream GPON port before opening Ajouter une constitution.
+        try:
+            msan_port = wait_for_msan_port_from_equipment_table(driver, timeout)
+        except (TimeoutException, ValueError):
+            msan_port = None
         open_add_constitution_form(driver, timeout, delete_existing=True)
-        return spl
+        return spl, msan_port
 
     if command:
-        spl = research("NNETO", command)
-        if spl is not False:
-            return "CMD", spl
+        result = research("NNETO", command)
+        if result is not False:
+            spl, msan_port = result
+            return "CMD", spl, msan_port
     if login:
-        spl = research("Login", login)
-        if spl is not False:
-            return "Login", spl
+        result = research("Login", login)
+        if result is not False:
+            spl, msan_port = result
+            return "Login", spl, msan_port
     if command and not login:
         raise ValueError(
             f"Commande {command} sans circuit associé et aucun Login de secours."
@@ -183,7 +191,7 @@ def find_target_fibre_action(driver, target_port: str):
 
 def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
     timeout = int(config["timeout_seconds"])
-    search_mode, spl = open_pco_form_for_bulk(
+    search_mode, spl, msan_port = open_pco_form_for_bulk(
         driver,
         config,
         row.get("command", ""),
@@ -205,6 +213,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": None,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "message": f"PCO introuvable : {row['pco']}.",
         }
@@ -220,6 +229,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": None,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "diagnostic": diagnostic,
             "message": "Aucun câble FO4/FO8-Active trouvé.",
@@ -235,6 +245,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": None,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "cable": cable_label,
             "message": f"Le brin {target_brin} n’existe pas dans ce PCO.",
@@ -250,6 +261,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": previous_login,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "cable": cable_label,
             "fibre_label": fibre_label,
@@ -275,6 +287,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": previous_login,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "cable": cable_label,
             "fibre_label": fibre_label,
@@ -289,6 +302,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
                 "status": "PORT_UNAVAILABLE", "status_label": "Port indisponible",
                 "search_mode": search_mode, "previous_login": previous_login,
                 "spl": spl, "odf_used": used_odf, "cable": cable_label,
+                "msan_port": msan_port,
                 "fibre_label": fibre_label,
                 "message": "WimTech indique : pas de port disponible au niveau fibre optique. Passage à la ligne suivante.",
             }
@@ -302,6 +316,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
             "search_mode": search_mode,
             "previous_login": previous_login,
             "spl": spl,
+            "msan_port": msan_port,
             "odf_used": used_odf,
             "cable": cable_label,
             "fibre_label": fibre_label,
@@ -326,6 +341,7 @@ def mutate_bulk_row(driver, config: dict, row: dict) -> dict:
         "search_mode": search_mode,
         "previous_login": previous_login,
         "spl": spl,
+        "msan_port": msan_port,
         "odf_used": used_odf,
         "cable": cable_label,
         "fibre_label": fibre_label,
