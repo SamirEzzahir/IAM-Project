@@ -28,11 +28,13 @@ from assignment_excel import (
     parse_assignment_workbook, parse_msan_mapping, resolve_msan_spl,
     save_msan_mapping,
 )
+from degroupage import load_degroupage_lookup, parse_degroupage_workbook, save_degroupage_lookup
 from config import load_config, save_config
 from job_store import JobStore
 from pco_catalog import build_pco_catalog
 from pco_logic import parse_spl
-from result_excel import assignment_results_excel, available_pcos_excel
+from result_excel import assignment_results_excel, available_pcos_excel, renseigner_results_excel
+from renseigner import run_renseigner
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
 from wimtech_checker import check_all_pcos, lookup_login_msan_port
@@ -42,6 +44,7 @@ BASE_DIR = Path(__file__).resolve().parent
 LATEST_RESULTS_PATH = BASE_DIR / "data" / "available_pcos.json"
 BULK_RESULTS_DIR = BASE_DIR / "data" / "bulk_results"
 MSAN_MAPPING_PATH = BASE_DIR / "data" / "msan_spl_mapping.json"
+DEGROUPAGE_PATH = BASE_DIR / "data" / "degroupage_lookup.json"
 JOB_STORE = JobStore(BASE_DIR / "data" / "jobs.sqlite3", max_jobs=20)
 
 app = Flask(__name__)
@@ -263,6 +266,9 @@ def run_job(job_id: str) -> None:
                 return
 
     def on_result(index: int, result: dict) -> None:
+        msan_port = result.get("msan_port")
+        if msan_port:
+            result["port_spl"] = resolve_msan_spl(MSAN_MAPPING_PATH, msan_port)
         with jobs_lock:
             current = jobs.get(job_id)
             if not current:
@@ -548,6 +554,29 @@ def run_bulk_job(job_id: str) -> None:
         prune_memory_jobs()
 
 
+def run_renseigner_job(job_id: str) -> None:
+    with jobs_lock:
+        job = jobs[job_id]; job["status"] = "RUNNING"; job["started_at"] = utc_now()
+        rows, stopped = copy.deepcopy(job["renseigner_rows"]), job["stop_event"]
+
+    def on_result(index: int, result: dict) -> None:
+        with jobs_lock:
+            current = jobs[job_id]; current["results"][index] = result
+            current["completed_count"] = sum(1 for item in current["results"] if item.get("status") != "PENDING")
+            current["updated_at"] = utc_now()
+
+    try:
+        run_renseigner(config=load_config(), rows=rows, degroupage=load_degroupage_lookup(DEGROUPAGE_PATH), stopped=stopped.is_set, on_result=on_result, on_log=lambda level, message: add_log(job_id, level, message))
+        with jobs_lock:
+            current = jobs[job_id]; current["status"] = "STOPPED" if stopped.is_set() else "COMPLETED"; current["finished_at"] = utc_now(); current["updated_at"] = current["finished_at"]
+    except Exception as exc:
+        add_log(job_id, "ERROR", f"Erreur Renseigner PCOs : {exc}")
+        with jobs_lock:
+            current = jobs[job_id]; current["status"] = "ERROR"; current["error"] = str(exc); current["finished_at"] = utc_now()
+    finally:
+        persist_completed_job(job_id); prune_memory_jobs()
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -575,7 +604,8 @@ def generate_pcos():
 
 @app.get("/api/config")
 def get_config():
-    return jsonify(ok=True, config=load_config())
+    config = load_config(); config.pop("wiam_password", None)
+    return jsonify(ok=True, config=config)
 
 
 @app.post("/api/config")
@@ -584,7 +614,71 @@ def update_config():
         config = save_config(request.get_json(silent=True) or {})
     except ValueError as exc:
         return jsonify(ok=False, error=str(exc)), 400
+    config.pop("wiam_password", None)
     return jsonify(ok=True, config=config)
+
+
+@app.post("/api/config/degroupage")
+def upload_degroupage():
+    uploaded = request.files.get("file")
+    if not uploaded or Path(uploaded.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
+        return jsonify(ok=False, error="Format accepté : .xlsx ou .xlsm."), 400
+    try:
+        lookup = parse_degroupage_workbook(uploaded.stream.read(15 * 1024 * 1024 + 1))
+        save_degroupage_lookup(DEGROUPAGE_PATH, lookup)
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    return jsonify(ok=True, count=len(lookup))
+
+
+@app.post("/api/renseigner/start")
+def start_renseigner():
+    payload = request.get_json(silent=True) or {}
+    mode = str(payload.get("mode", "")).upper()
+    if mode not in {"CMD", "LOGIN", "BOTH"}:
+        return jsonify(ok=False, error="Mode Renseigner PCOs invalide."), 400
+    values, seen = [], set()
+    for value in str(payload.get("values", "")).replace(";", "\n").replace(",", "\n").splitlines():
+        item = value.strip()
+        if item and item.upper() not in seen:
+            seen.add(item.upper()); values.append(item)
+    if not values:
+        return jsonify(ok=False, error="Saisissez au moins une valeur."), 400
+    if len(values) > 2000:
+        return jsonify(ok=False, error="La liste dépasse 2000 lignes."), 400
+    with jobs_lock:
+        active = next((value for value in jobs.values() if value["status"] in {"QUEUED", "RUNNING", "PAUSED", "STOPPING"}), None)
+        if active:
+            return jsonify(ok=False, error="Une automatisation Selenium est déjà en cours.", job_id=active["job_id"]), 409
+        job_id, now = uuid4().hex, utc_now()
+        rows = [{"excel_row": index, "input": item, "mode": mode} for index, item in enumerate(values, 1)]
+        job = {"job_id": job_id, "kind": "RENSEIGNER", "renseigner_rows": rows, "status": "QUEUED", "created_at": now, "started_at": None, "finished_at": None, "updated_at": now, "error": None, "total": len(rows), "completed_count": 0, "results": [{**row, "login": "", "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "status": "PENDING", "status_label": "En attente", "message": "En attente."} for row in rows], "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None}
+        jobs[job_id] = job; job["thread"] = Thread(target=run_renseigner_job, args=(job_id,), daemon=True); job["thread"].start()
+    return jsonify(ok=True, job_id=job_id, job=public_job(job))
+
+
+@app.get("/api/renseigner/<job_id>")
+def renseigner_status(job_id: str):
+    job = snapshot_job(job_id)
+    if not job or job.get("kind") != "RENSEIGNER":
+        return jsonify(ok=False, error="Traitement Renseigner PCOs introuvable."), 404
+    return jsonify(ok=True, job=job)
+
+
+@app.post("/api/renseigner/<job_id>/stop")
+def stop_renseigner(job_id: str):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job or job.get("kind") != "RENSEIGNER": return jsonify(ok=False, error="Traitement introuvable."), 404
+        job["stop_event"].set(); job["status"] = "STOPPING"; job["updated_at"] = utc_now()
+    return jsonify(ok=True, status="STOPPING")
+
+
+@app.get("/api/renseigner/<job_id>/result.xlsx")
+def download_renseigner(job_id: str):
+    job = snapshot_job(job_id)
+    if not job or job.get("kind") != "RENSEIGNER": return jsonify(ok=False, error="Traitement introuvable."), 404
+    return send_file(io.BytesIO(renseigner_results_excel(job)), as_attachment=True, download_name=f"renseigner_pcos_{job_id[:8]}.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.post("/api/config/msan-mapping")
@@ -927,6 +1021,8 @@ def start_bulk_mutation():
                     "search_mode": None,
                     "previous_login": None,
                     "spl": None,
+                    "port_spl": None,
+                    "msan_port": None,
                     "message": row.get("validation_error") or "En attente du traitement.",
                 }
                 for row in rows

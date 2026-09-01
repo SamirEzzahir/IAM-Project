@@ -60,3 +60,11 @@ def available_pcos_excel(job: dict) -> bytes:
             row.get("checked_at") or "",
         ])
     return _finish(workbook, [25, 32, 12, 18, 28])
+
+
+def renseigner_results_excel(job: dict) -> bytes:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "Renseigner PCOs"
+    sheet.append(["#", "Entrée", "Login", "Source", "SPL/SRO", "PCO", "brin", "État", "Durée (s)", "Message"])
+    for row in job.get("results", []):
+        sheet.append([row.get("excel_row"), row.get("input"), row.get("login"), row.get("source"), row.get("constitution_spl"), row.get("constitution_pco"), row.get("constitution_brin"), row.get("status_label"), row.get("duration_seconds"), row.get("message")])
+    return _finish(workbook, [8, 22, 22, 22, 28, 30, 12, 18, 14, 60])

@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from pco_logic import alternate_prefixed_pco, group_pco_candidates
+from pco_logic import alternate_prefixed_pco, group_pco_candidates, prefixed_111_pco
 from wimtech_parser import (
     base_result_confirms_existence,
     extract_available_fibre_ports,
@@ -430,10 +430,10 @@ def submit_pco_location(
 ) -> tuple[str, str]:
     """Submit a PCO, retrying once with OMSAN ODF naming when required."""
 
-    def fill_and_submit(candidate_odf: str) -> None:
+    def fill_and_submit(candidate_odf: str, candidate_pco: str) -> None:
         set_input(driver, "fr:inputOdf", candidate_odf, timeout)
         set_input(driver, "fr:inputZro", zr, timeout)
-        set_input(driver, "fr:inputEquipAmont", pco, timeout)
+        set_input(driver, "fr:inputEquipAmont", candidate_pco, timeout)
         submit_by_id(driver, "fr:b_et", timeout)
 
     def wait_state():
@@ -445,22 +445,30 @@ def submit_pco_location(
         )
 
     primary_odf = str(odf or "").strip()
-    fill_and_submit(primary_odf)
-    state = wait_state()
-    if state != "INVALID_ODF":
-        return state, primary_odf
+    candidate_pcos = [pco]
+    prefixed_pco = prefixed_111_pco(pco)
+    if prefixed_pco:
+        candidate_pcos.append(prefixed_pco)
 
-    fallback_odf = odf_with_msan(primary_odf)
-    if fallback_odf == primary_odf:
-        raise RuntimeError(f"Nom du ODF invalide : {primary_odf}.")
+    used_odf = primary_odf
+    for candidate_pco in candidate_pcos:
+        fill_and_submit(used_odf, candidate_pco)
+        state = wait_state()
+        if state == "INVALID_ODF":
+            fallback_odf = odf_with_msan(used_odf)
+            if fallback_odf == used_odf:
+                raise RuntimeError(f"Nom du ODF invalide : {used_odf}.")
+            fill_and_submit(fallback_odf, candidate_pco)
+            state = wait_state()
+            if state == "INVALID_ODF":
+                raise RuntimeError(
+                    f"Nom du ODF invalide après les essais {used_odf} et {fallback_odf}."
+                )
+            used_odf = fallback_odf
+        if state != "MISSING" or candidate_pco == candidate_pcos[-1]:
+            return state, used_odf
 
-    fill_and_submit(fallback_odf)
-    state = wait_state()
-    if state == "INVALID_ODF":
-        raise RuntimeError(
-            f"Nom du ODF invalide après les essais {primary_odf} et {fallback_odf}."
-        )
-    return state, fallback_odf
+    return "MISSING", used_odf
 
 
 def find_active_cable_link(driver):

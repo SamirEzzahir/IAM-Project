@@ -1,6 +1,6 @@
 import unittest
 
-from pco_logic import alternate_prefixed_pco, group_pco_candidates, parse_spl
+from pco_logic import alternate_prefixed_pco, group_pco_candidates, parse_spl, prefixed_111_pco
 
 
 class ParseSplTests(unittest.TestCase):
@@ -30,6 +30,11 @@ class ParseSplTests(unittest.TestCase):
             alternate_prefixed_pco(result.pco_candidates[0]),
             "OFAD33-ZO-T.111",
         )
+
+    def test_builds_111_alias_for_regular_and_split_pcos(self):
+        self.assertEqual(prefixed_111_pco("OFNA12-ZO-321/1"), "OFNA12-ZO-111.321/1")
+        self.assertEqual(prefixed_111_pco("OFNA12-ZO-321"), "OFNA12-ZO-111.321")
+        self.assertIsNone(prefixed_111_pco("OFNA12-ZO-111.321"))
 
     def test_four_digit_equipment_alias_generates_the_same_pcos(self):
         regular = parse_spl("OFBT03-ZO-111.3")

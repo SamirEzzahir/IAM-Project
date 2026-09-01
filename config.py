@@ -19,6 +19,9 @@ DEFAULT_CONFIG = {
     "test_login": "I10260472",
     "timeout_seconds": 20,
     "headless": False,
+    "wiam_url": "",
+    "wiam_username": "",
+    "wiam_password": "",
 }
 
 
@@ -54,11 +57,18 @@ def save_config(payload: dict) -> dict:
     if timeout < 5 or timeout > 120:
         raise ValueError("Le délai doit être compris entre 5 et 120 secondes.")
 
+    wiam_url = str(payload.get("wiam_url", current["wiam_url"])).strip()
+    if wiam_url and not wiam_url.startswith(("http://", "https://")):
+        raise ValueError("L’URL WIAM doit commencer par http:// ou https://")
+    wiam_password = str(payload.get("wiam_password", "")).strip() or current["wiam_password"]
     result = {
         "wimtech_url": url,
         "test_login": login,
         "timeout_seconds": timeout,
         "headless": bool(payload.get("headless", current["headless"])),
+        "wiam_url": wiam_url,
+        "wiam_username": str(payload.get("wiam_username", current["wiam_username"])).strip(),
+        "wiam_password": wiam_password,
     }
 
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

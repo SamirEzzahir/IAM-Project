@@ -7,6 +7,8 @@ let currentAssignmentJobId = null;
 let assignmentPollTimer = null;
 let currentBulkJobId = null;
 let bulkPollTimer = null;
+let currentRenseignerJobId = null;
+let renseignerPollTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,6 +72,7 @@ function switchTab(name) {
     check: ["FB EMM · Contrôle PCO", "Génération SPL et vérification des ports libres"],
     assign: ["FB EMM · Affectation automatique", "Mutation du Login vers le premier port utilisable"],
     bulk: ["FB EMM · Bulk Mutation CMD&Login", "Mutation Excel avec PCO et brin exacts"],
+    renseigner: ["FB EMM · Renseigner PCOs", "Collecte des Logins et constitutions actuelles"],
     available: ["FB EMM · PCO disponibles", "Collection des ports disponibles pour les prochaines fonctions"],
     config: ["FB EMM · Configuration", "Paramètres locaux de WimTech et Selenium"],
   };
@@ -413,7 +416,7 @@ async function uploadMsanMapping() {
 
 function renderBulkRows(rows) {
   if (!rows?.length) {
-    $("bulkResultsBody").innerHTML = '<tr><td colspan="12" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
+    $("bulkResultsBody").innerHTML = '<tr><td colspan="13" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
     return;
   }
   $("bulkResultsBody").innerHTML = rows.map((row) => `
@@ -427,6 +430,7 @@ function renderBulkRows(rows) {
       <td>${escapeHtml(row.previous_login || "—")}</td>
       <td class="pco-code">${escapeHtml(row.spl || "—")}</td>
       <td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td>
+      <td class="pco-code">${escapeHtml(row.port_spl || "—")}</td>
       <td class="pco-code">${escapeHtml(row.msan_port || "—")}</td>
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
@@ -555,6 +559,25 @@ function updateBulkFileMeta() {
     : "Aucun fichier sélectionné.";
 }
 
+function renseignerMode() { return document.querySelector('input[name="renseignerMode"]:checked').value; }
+function renderRenseigner(job) {
+  $("renseignerStatusBadge").textContent = job.status === "COMPLETED" ? "Terminé" : job.status === "RUNNING" ? "En cours" : job.status;
+  $("renseignerStatusBadge").className = `badge ${job.status === "COMPLETED" ? "ok" : job.status === "ERROR" ? "error" : "neutral"}`;
+  $("renseignerProgressBar").style.width = `${job.progress_percent || 0}%`;
+  $("renseignerResultsBody").innerHTML = (job.results || []).map((row) => `<tr><td>${row.excel_row}</td><td>${escapeHtml(row.input)}</td><td>${escapeHtml(row.login || "—")}</td><td>${escapeHtml(row.source || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_spl || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_pco || "—")}</td><td>${escapeHtml(row.constitution_brin || "—")}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`).join("") || '<tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr>';
+  $("renseignerLog").innerHTML = (job.logs || []).map((line) => `<div class="log-line ${escapeHtml(line.level.toLowerCase())}"><time>${escapeHtml(formatTime(line.time))}</time><span>${escapeHtml(line.message)}</span></div>`).join("");
+  const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
+  $("renseignerStartBtn").disabled = active; $("renseignerStopBtn").disabled = !active;
+  $("renseignerDownloadBtn").href = !active ? `/api/renseigner/${job.job_id}/result.xlsx` : "#"; $("renseignerDownloadBtn").classList.toggle("disabled", active);
+}
+async function pollRenseigner() { if (!currentRenseignerJobId) return; try { const data = await api(`/api/renseigner/${currentRenseignerJobId}`); renderRenseigner(data.job); if (["COMPLETED", "STOPPED", "ERROR"].includes(data.job.status)) { clearInterval(renseignerPollTimer); renseignerPollTimer = null; } } catch (error) { toast(error.message); } }
+async function startRenseigner() { const values = $("renseignerValues").value.trim(); if (!values) return toast("Saisissez au moins une valeur."); try { const data = await api("/api/renseigner/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: renseignerMode(), values }) }); currentRenseignerJobId = data.job_id; renderRenseigner(data.job); renseignerPollTimer = setInterval(pollRenseigner, 900); } catch (error) { $("renseignerMessage").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; } }
+async function stopRenseigner() { if (currentRenseignerJobId) await api(`/api/renseigner/${currentRenseignerJobId}/stop`, { method: "POST" }); }
+function updateRenseignerMode() { const mode = renseignerMode(); $("renseignerValuesLabel").textContent = mode === "LOGIN" ? "Liste de Logins" : "Liste de CMD"; $("renseignerValues").placeholder = mode === "LOGIN" ? "Un Login par ligne" : "Un CMD par ligne"; }
+function clearRenseigner() { currentRenseignerJobId = null; clearInterval(renseignerPollTimer); $("renseignerValues").value = ""; $("renseignerResultsBody").innerHTML = '<tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr>'; $("renseignerLog").innerHTML = ""; $("renseignerStatusBadge").textContent = "En attente"; $("renseignerDownloadBtn").classList.add("disabled"); }
+
+async function uploadDegroupage() { const file = $("degroupageFile").files[0]; if (!file) return toast("Sélectionnez le fichier Degroupage."); const form = new FormData(); form.append("file", file); try { const data = await api("/api/config/degroupage", { method: "POST", body: form }); toast(`${data.count} CMD Degroupage importés.`); } catch (error) { toast(error.message); } }
+
 async function previewBulkFile() {
   updateBulkFileMeta();
   const file = $("bulkFileInput").files[0];
@@ -574,6 +597,7 @@ async function previewBulkFile() {
       search_mode: null,
       previous_login: null,
       spl: null,
+      port_spl: null,
       msan_port: null,
       message: row.validation_error || "Aperçu : aucune mutation lancée.",
     }));
@@ -718,6 +742,8 @@ async function loadConfig() {
     $("testLogin").value = config.test_login;
     $("timeoutSeconds").value = config.timeout_seconds;
     $("headless").checked = Boolean(config.headless);
+    $("wiamUrl").value = config.wiam_url || "";
+    $("wiamUsername").value = config.wiam_username || "";
   } catch (error) {
     toast(error.message);
   }
@@ -734,6 +760,7 @@ async function saveConfiguration(event) {
         test_login: $("testLogin").value.trim(),
         timeout_seconds: Number($("timeoutSeconds").value),
         headless: $("headless").checked,
+        wiam_url: $("wiamUrl").value.trim(), wiam_username: $("wiamUsername").value.trim(), wiam_password: $("wiamPassword").value,
       }),
     });
     toast("Configuration enregistrée.");
@@ -769,6 +796,11 @@ document.querySelectorAll('input[name="assignmentMode"]').forEach((radio) => rad
 $("assignDownloadBtn").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("resolveMsanBtn").addEventListener("click", resolveMsanPort);
 $("uploadMsanMappingBtn").addEventListener("click", uploadMsanMapping);
+$("uploadDegroupageBtn").addEventListener("click", uploadDegroupage);
+$("renseignerStartBtn").addEventListener("click", startRenseigner);
+$("renseignerStopBtn").addEventListener("click", stopRenseigner);
+$("renseignerClearBtn").addEventListener("click", clearRenseigner);
+document.querySelectorAll('input[name="renseignerMode"]').forEach((radio) => radio.addEventListener("change", updateRenseignerMode));
 $("assignBatchFile").addEventListener("change", previewAssignmentBatchFile);
 $("bulkFileInput").addEventListener("change", previewBulkFile);
 $("bulkStartBtn").addEventListener("click", startBulkMutation);
@@ -786,3 +818,4 @@ loadLatestAvailable();
 previewSpl();
 previewAssignmentSpl();
 updateAssignmentMode();
+updateRenseignerMode();

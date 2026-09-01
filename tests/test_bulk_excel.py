@@ -103,6 +103,7 @@ class BulkExcelTests(unittest.TestCase):
             "previous_login": "OLDLOGIN",
             "spl": "OFOF-ZO-113.16",
             "status_label": "Muté",
+            "port_spl": "OFOF-ZO-113.16",
             "msan_port": "MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8",
             "message": "Mutation terminée.",
             "checked_at": "2026-08-28T12:00:00+00:00",
@@ -117,7 +118,8 @@ class BulkExcelTests(unittest.TestCase):
             self.assertEqual(sheet["H2"].value, "OLDLOGIN")
             self.assertEqual(sheet["I2"].value, "OFOF-ZO-113.16")
             self.assertEqual(sheet["J2"].value, "Muté")
-            self.assertEqual(sheet["K2"].value, "MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8")
+            self.assertEqual(sheet["K2"].value, "OFOF-ZO-113.16")
+            self.assertEqual(sheet["L2"].value, "MHOu-Fe-MourabitineERAC1--2C2:0-0-18-8")
 
 
 if __name__ == "__main__":

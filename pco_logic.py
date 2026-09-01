@@ -107,6 +107,18 @@ def alternate_prefixed_pco(pco: str) -> str | None:
     return f"{location}-T.{match.group(1)}"
 
 
+def prefixed_111_pco(pco: str) -> str | None:
+    """Return WimTech's ``111.`` alias for a PCO identifier when applicable."""
+
+    value = str(pco or "").strip().upper()
+    if "-" not in value:
+        return None
+    location, identifier = value.rsplit("-", 1)
+    if not re.fullmatch(r"\d+(?:/\d+)?", identifier):
+        return None
+    return f"{location}-111.{identifier}"
+
+
 def group_pco_candidates(candidates: list[str]) -> list[tuple[str, str, str]]:
     """Group candidates as ``base, base/1, base/2``.
 

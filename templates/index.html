@@ -21,6 +21,7 @@
         <a class="active" href="#tab-check" data-tab="check"><span class="nav-icon">⌕</span><span>Contrôle des PCO</span></a>
         <a href="#tab-assign" data-tab="assign"><span class="nav-icon">⇄</span><span>Affectation automatique</span></a>
         <a href="#tab-bulk" data-tab="bulk"><span class="nav-icon">▤</span><span>Bulk Mutation CMD&amp;Login</span></a>
+        <a href="#tab-renseigner" data-tab="renseigner"><span class="nav-icon">⌁</span><span>Renseigner PCOs</span></a>
         <a href="#tab-available" data-tab="available"><span class="nav-icon">✓</span><span>PCO disponibles</span></a>
         <a href="#tab-config" data-tab="config"><span class="nav-icon">⚙</span><span>Configuration</span></a>
       </nav>
@@ -86,6 +87,22 @@
             <div class="log-title"><span>●</span> Journal en direct</div>
             <div id="liveLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du lancement de Selenium…</span></div></div>
           </article>
+        </section>
+
+        <section id="tab-renseigner" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">⌁</span><div><h2>Renseigner PCOs</h2><p>Collecter les Logins WIAM et les constitutions actuelles WimTech.</p></div></div>
+            <div class="assignment-mode top-gap" role="radiogroup">
+              <label><input type="radio" name="renseignerMode" value="CMD" checked><span>CMD → Login</span></label>
+              <label><input type="radio" name="renseignerMode" value="LOGIN"><span>Login → Constitution</span></label>
+              <label><input type="radio" name="renseignerMode" value="BOTH"><span>CMD → Login + Constitution</span></label>
+            </div>
+            <div class="field top-gap"><label id="renseignerValuesLabel" for="renseignerValues">Liste de CMD</label><textarea id="renseignerValues" rows="8" placeholder="Un CMD par ligne"></textarea></div>
+            <div class="actions"><button id="renseignerStartBtn" class="primary" type="button">⌁ Lancer la collecte</button><button id="renseignerStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button><button id="renseignerClearBtn" class="secondary" type="button">↻ Effacer</button><a id="renseignerDownloadBtn" class="secondary button-link disabled" href="#">↓ Télécharger Excel</a></div>
+            <div id="renseignerMessage" class="message-slot"></div>
+          </article>
+          <article class="card results-card"><div class="result-head"><div><h2>Résultats Renseigner PCOs</h2><p>Login, source de recherche et constitution actuelle.</p></div><span id="renseignerStatusBadge" class="badge neutral">En attente</span></div><div class="progress-track"><div id="renseignerProgressBar"></div></div><div class="results"><table><thead><tr><th>#</th><th>Entrée</th><th>Login</th><th>Source</th><th>SPL/SRO</th><th>PCO</th><th>brin</th><th>État</th><th>Durée</th><th>Message</th></tr></thead><tbody id="renseignerResultsBody"><tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr></tbody></table></div></article>
+          <article class="log-card"><div class="log-title"><span>●</span> Journal Renseigner PCOs</div><div id="renseignerLog" class="live-log"></div></article>
         </section>
 
         <section id="tab-assign" class="tab">
@@ -197,8 +214,8 @@
             <div class="progress-track"><div id="bulkProgressBar"></div></div>
             <div class="results">
               <table class="bulk-table">
-                <thead><tr><th>Ligne</th><th>Commande GPON</th><th>Login</th><th>PCO</th><th>brin</th><th>Recherche</th><th>Login précédent</th><th>SPL</th><th>État</th><th>Port (Nom Usuel + NE)</th><th>Durée</th><th>Message</th></tr></thead>
-                <tbody id="bulkResultsBody"><tr><td colspan="12" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr></tbody>
+                <thead><tr><th>Ligne</th><th>Commande GPON</th><th>Login</th><th>PCO</th><th>brin</th><th>Recherche</th><th>Login précédent</th><th>SPL</th><th>État</th><th>SPL correspondant au port</th><th>Port (Nom Usuel + NE)</th><th>Durée</th><th>Message</th></tr></thead>
+                <tbody id="bulkResultsBody"><tr><td colspan="13" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr></tbody>
               </table>
             </div>
           </article>
@@ -228,6 +245,9 @@
             <div class="section-heading"><span class="section-icon">⚙</span><div><h2>Configuration WimTech</h2><p>Ces valeurs restent sur ce poste et sont utilisées uniquement par Python/Selenium.</p></div></div>
             <form id="configForm" class="config-grid">
               <div class="field full"><label for="wimtechUrl">URL Mutation GPON</label><input id="wimtechUrl" name="wimtech_url" type="url" required></div>
+              <div class="field full"><label for="wiamUrl">URL recherche CMD WIAM</label><input id="wiamUrl" type="url" placeholder="http://…"></div>
+              <div class="field"><label for="wiamUsername">Login WIAM</label><input id="wiamUsername" type="text"></div>
+              <div class="field"><label for="wiamPassword">Mot de passe WIAM</label><input id="wiamPassword" type="password" placeholder="Laisser vide pour conserver"></div>
               <div class="field"><label for="testLogin">Login de test</label><input id="testLogin" name="test_login" type="text" required></div>
               <div class="field"><label for="timeoutSeconds">Délai maximum (secondes)</label><input id="timeoutSeconds" name="timeout_seconds" type="number" min="5" max="120" required></div>
               <label class="check-row"><input id="headless" name="headless" type="checkbox"><span>Exécuter Chrome en arrière-plan</span></label>
@@ -235,6 +255,7 @@
             </form>
             <div class="field full top-gap"><label for="msanMappingFile">Correspondance PORT MSAN → SPL</label><input id="msanMappingFile" type="file" accept=".xlsx,.xlsm,.csv"><small>Colonnes : Carte · Splitter ou SRO</small></div>
             <div class="actions"><button id="uploadMsanMappingBtn" class="secondary" type="button">Importer la correspondance</button></div>
+            <div class="field full top-gap"><label for="degroupageFile">Correspondance CMD Degroupage → Login</label><input id="degroupageFile" type="file" accept=".xlsx,.xlsm"><small>Colonnes : CMD · Login · ND (optionnel)</small></div><div class="actions"><button id="uploadDegroupageBtn" class="secondary" type="button">Importer Degroupage</button></div>
             <div class="warning top-gap"><strong>Conseil :</strong> laissez Chrome visible pendant les premiers essais. Si WimTech change son HTML, un diagnostic est enregistré localement pour ajuster les sélecteurs.</div>
           </article>
         </section>
