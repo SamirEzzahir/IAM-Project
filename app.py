@@ -652,7 +652,7 @@ def start_renseigner():
             return jsonify(ok=False, error="Une automatisation Selenium est déjà en cours.", job_id=active["job_id"]), 409
         job_id, now = uuid4().hex, utc_now()
         rows = [{"excel_row": index, "input": item, "mode": mode} for index, item in enumerate(values, 1)]
-        job = {"job_id": job_id, "kind": "RENSEIGNER", "renseigner_rows": rows, "status": "QUEUED", "created_at": now, "started_at": None, "finished_at": None, "updated_at": now, "error": None, "total": len(rows), "completed_count": 0, "results": [{**row, "login": "", "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "status": "PENDING", "status_label": "En attente", "message": "En attente."} for row in rows], "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None}
+        job = {"job_id": job_id, "kind": "RENSEIGNER", "renseigner_rows": rows, "status": "QUEUED", "created_at": now, "started_at": None, "finished_at": None, "updated_at": now, "error": None, "total": len(rows), "completed_count": 0, "results": [{**row, "login": "", "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": "", "status": "PENDING", "status_label": "En attente", "message": "En attente."} for row in rows], "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None}
         jobs[job_id] = job; job["thread"] = Thread(target=run_renseigner_job, args=(job_id,), daemon=True); job["thread"].start()
     return jsonify(ok=True, job_id=job_id, job=public_job(job))
 

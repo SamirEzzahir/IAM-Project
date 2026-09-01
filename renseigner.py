@@ -11,7 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from wimtech_checker import (
     build_driver, close_driver, has_login_error, select_search_mode, set_input,
-    submit_by_id, wait_document,
+    submit_by_id, wait_document, wait_for_msan_port_from_equipment_table,
 )
 
 
@@ -29,6 +29,19 @@ def collect_wiam_login(driver, config: dict, command: str) -> str:
         raise ValueError("Configurez l’URL, le Login et le mot de passe WIAM.")
     driver.get(config["wiam_url"])
     _wiam_login(driver, config, timeout)
+    # WIAM often opens on Accueil even when the Commandes URL was requested.
+    # Follow the same Commandes top-bar link that the user clicks manually.
+    if not driver.find_elements(By.NAME, "num_commande"):
+        command_link = next(
+            (
+                link for link in driver.find_elements(By.TAG_NAME, "a")
+                if "commande_recherche_critere.jsp" in (link.get_attribute("href") or "").lower()
+            ),
+            None,
+        )
+        if not command_link:
+            raise ValueError("Lien WIAM Commandes introuvable depuis la page Accueil.")
+        driver.execute_script("arguments[0].click();", command_link)
     field = WebDriverWait(driver, timeout).until(lambda current: current.find_element(By.NAME, "num_commande"))
     radios = driver.find_elements(By.CSS_SELECTOR, "input[type='radio'][value='1']")
     if radios and not radios[0].is_selected():
@@ -66,12 +79,23 @@ def collect_constitution(driver, config: dict, login: str) -> dict[str, str]:
         if len(cells) >= 10:
             aval.append(cells)
     if len(aval) < 2:
-        return {"constitution_spl": "", "constitution_pco": "", "constitution_brin": ""}
-    row = aval[1]
+        return {"constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": ""}
+    # The first AVAL row holds the SPL/SRO (cell 8).  The second AVAL row
+    # holds the current PCO (cell 8) and its nested cable position (cell 7).
+    spl_row, pco_row = aval[0], aval[1]
+    try:
+        brin = (pco_row[7].text or "").strip()
+    except Exception:
+        brin = ""
+    try:
+        msan_port = wait_for_msan_port_from_equipment_table(driver, timeout)
+    except (TimeoutException, ValueError):
+        msan_port = ""
     return {
-        "constitution_spl": (row[1].text or "").strip(),
-        "constitution_pco": (row[9].text or "").strip(),
-        "constitution_brin": (row[8].text or "").strip(),
+        "constitution_spl": (spl_row[8].text or "").strip(),
+        "constitution_pco": (pco_row[8].text or "").strip(),
+        "constitution_brin": brin,
+        "msan_port": msan_port,
     }
 
 
@@ -85,7 +109,7 @@ def run_renseigner(*, config: dict, rows: list[dict], degroupage: dict, stopped:
         for index, row in enumerate(rows):
             if stopped(): break
             started = time.monotonic()
-            result = {**row, "login": row.get("login", ""), "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": ""}
+            result = {**row, "login": row.get("login", ""), "source": "", "constitution_spl": "", "constitution_pco": "", "constitution_brin": "", "msan_port": ""}
             try:
                 if row["mode"] in {"CMD", "BOTH"}:
                     command = row["input"].upper()
