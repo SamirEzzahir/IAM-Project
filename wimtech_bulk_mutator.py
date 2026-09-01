@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from typing import Callable
@@ -27,6 +28,7 @@ from wimtech_checker import (
     submit_pco_location,
     submit_by_id,
     wait_document,
+    wait_reload,
     wait_for_action_or_port_error,
 )
 from wimtech_parser import normalize, parse_fibre_label
@@ -37,6 +39,45 @@ SPL_PATTERN = r"\b[A-Z0-9]+-ZO-[A-Z0-9]+(?:\.[A-Z0-9]+)+\b"
 
 class NoPortAvailableError(Exception):
     pass
+
+
+def ensure_in_progress_circuit_selected(driver, timeout: int) -> bool:
+    """Select the exact ``En cours`` circuit before the search is validated.
+
+    WimTech sometimes shows a circuit-selection page after a CMD/Login search.
+    Its checkboxes submit the form when clicked, so the document must be allowed
+    to reload before the caller clicks ``Valider``.  ``En cours decon`` is a
+    distinct status and must never be selected by this safeguard.
+    """
+
+    circuit_labels = driver.find_elements(
+        By.XPATH,
+        "//*[@id='frm:panel_id']//span[starts-with(@id, 'frm:li_')]",
+    )
+    for label in circuit_labels:
+        label_text = normalize(label.text)
+        if "EN COURS DECON" in label_text or not re.search(
+            r"(?:^|[-\s])EN COURS(?:[-\s]|$)", label_text
+        ):
+            continue
+
+        label_id = label.get_attribute("id") or ""
+        checkbox_id = label_id.replace("frm:li_", "frm:check_", 1)
+        if checkbox_id == label_id:
+            continue
+        checkboxes = driver.find_elements(By.ID, checkbox_id)
+        if not checkboxes:
+            continue
+
+        checkbox = checkboxes[0]
+        if checkbox.is_selected():
+            return False
+
+        previous_document = driver.find_element(By.TAG_NAME, "html")
+        click_element(driver, checkbox, timeout)
+        wait_reload(driver, previous_document, timeout)
+        return True
+    return False
 
 
 def extract_spl_from_constitution(driver) -> str | None:
@@ -87,6 +128,7 @@ def open_pco_form_for_bulk(
         if not driver.find_elements(By.ID, "frm:bt_2"):
             raise ValueError(f"Résultat de recherche WimTech non reconnu en mode {mode}.")
 
+        ensure_in_progress_circuit_selected(driver, timeout)
         submit_by_id(driver, "frm:bt_2", timeout)
         WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.ID, "frm:constitutionList"))

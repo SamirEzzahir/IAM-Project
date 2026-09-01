@@ -74,7 +74,10 @@ from wimtech_checker import (
     odf_with_msan,
     submit_pco_location,
 )
-from wimtech_bulk_mutator import extract_spl_from_constitution
+from wimtech_bulk_mutator import (
+    ensure_in_progress_circuit_selected,
+    extract_spl_from_constitution,
+)
 
 
 class FakeCheckbox:
@@ -104,6 +107,15 @@ class FakeCell:
 
     def get_attribute(self, name):
         return self.text_content if name == "textContent" else None
+
+
+class FakeCircuitLabel:
+    def __init__(self, circuit_id, text):
+        self.circuit_id = circuit_id
+        self.text = text
+
+    def get_attribute(self, name):
+        return self.circuit_id if name == "id" else None
 
 
 class FakeRow:
@@ -160,6 +172,46 @@ class MutationWorkflowTests(unittest.TestCase):
             extract_spl_from_constitution(driver),
             "OFOF-ZO-113.16",
         )
+
+    @patch("wimtech_bulk_mutator.wait_reload")
+    @patch("wimtech_bulk_mutator.click_element")
+    def test_bulk_selects_unchecked_en_cours_before_validation(self, click, wait_reload):
+        decon = FakeCircuitLabel(
+            "frm:li_16244441", "BOUREFES - En cours decon - OFOT04"
+        )
+        in_progress = FakeCircuitLabel(
+            "frm:li_18447975", "BOUREFES - En cours - OACH01"
+        )
+        unselected_in_progress = FakeCheckbox(selected=False)
+        document = object()
+        driver = Mock()
+        driver.find_elements.side_effect = [
+            [decon, in_progress],
+            [unselected_in_progress],
+        ]
+        driver.find_element.return_value = document
+
+        changed = ensure_in_progress_circuit_selected(driver, 20)
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            driver.find_elements.call_args_list[1],
+            call("id", "frm:check_18447975"),
+        )
+        click.assert_called_once_with(driver, unselected_in_progress, 20)
+        wait_reload.assert_called_once_with(driver, document, 20)
+
+    @patch("wimtech_bulk_mutator.click_element")
+    def test_bulk_keeps_already_selected_en_cours(self, click):
+        in_progress = FakeCircuitLabel(
+            "frm:li_18447975", "BOUREFES - En cours - OACH01"
+        )
+        selected = FakeCheckbox(selected=True)
+        driver = Mock()
+        driver.find_elements.side_effect = [[in_progress], [selected]]
+
+        self.assertFalse(ensure_in_progress_circuit_selected(driver, 20))
+        click.assert_not_called()
 
     def test_msan_odf_fallback_rule(self):
         self.assertEqual(odf_with_msan("OFOF"), "OMSANFOF")
