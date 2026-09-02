@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from pco_logic import alternate_prefixed_pco, group_pco_candidates
 from wimtech_checker import (
     build_driver,
+    action_delay_from_config,
     close_driver,
     cancel_current_pco,
     click_element,
@@ -213,7 +214,7 @@ def assign_login_to_first_port(
     halted = False
     try:
         on_log("INFO", f"Ouverture de Chrome pour l’affectation du Login {login}…")
-        driver = build_driver(bool(config.get("headless", False)))
+        driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
 
         def test_candidate(index: int, pco: str) -> dict | None:
             if is_stopped():

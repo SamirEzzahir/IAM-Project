@@ -743,11 +743,20 @@ async function loadConfig() {
     $("testLogin").value = config.test_login;
     $("timeoutSeconds").value = config.timeout_seconds;
     $("headless").checked = Boolean(config.headless);
+    $("debugMode").checked = Boolean(config.debug_mode);
+    $("actionDelaySeconds").value = Number(config.action_delay_seconds || 0);
+    updateDebugMode();
     $("wiamUrl").value = config.wiam_url || "";
     $("wiamUsername").value = config.wiam_username || "";
   } catch (error) {
     toast(error.message);
   }
+}
+
+function updateDebugMode() {
+  const enabled = $("debugMode").checked;
+  $("debugDelayField").classList.toggle("is-hidden", !enabled);
+  $("actionDelaySeconds").disabled = !enabled;
 }
 
 async function saveConfiguration(event) {
@@ -761,6 +770,8 @@ async function saveConfiguration(event) {
         test_login: $("testLogin").value.trim(),
         timeout_seconds: Number($("timeoutSeconds").value),
         headless: $("headless").checked,
+        debug_mode: $("debugMode").checked,
+        action_delay_seconds: Number($("actionDelaySeconds").value || 0),
         wiam_url: $("wiamUrl").value.trim(), wiam_username: $("wiamUsername").value.trim(), wiam_password: $("wiamPassword").value,
       }),
     });
@@ -813,6 +824,7 @@ $("refreshAvailableBtn").addEventListener("click", loadLatestAvailable);
 $("downloadCsv").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("downloadAvailableExcel").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 $("configForm").addEventListener("submit", saveConfiguration);
+$("debugMode").addEventListener("change", updateDebugMode);
 
 checkServer();
 loadConfig();

@@ -15,6 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from wimtech_checker import (
     body_text,
     build_driver,
+    action_delay_from_config,
     close_driver,
     cancel_current_pco,
     click_element,
@@ -31,6 +32,7 @@ from wimtech_checker import (
     wait_for_msan_port_from_equipment_table,
     wait_reload,
     wait_for_action_or_port_error,
+    navigate,
 )
 from wimtech_parser import normalize, parse_fibre_label
 
@@ -112,7 +114,7 @@ def open_pco_form_for_bulk(
     timeout = int(config["timeout_seconds"])
 
     def research(mode: str, value: str) -> tuple[str | None, str | None] | bool:
-        driver.get(config["wimtech_url"])
+        navigate(driver, config["wimtech_url"])
         wait_document(driver, timeout)
         select_search_mode(driver, timeout, mode)
         set_input(driver, "frm:in_2", value, timeout)
@@ -363,7 +365,7 @@ def mutate_bulk_rows(
     driver = None
     try:
         on_log("INFO", f"Ouverture de Chrome pour {len(rows)} mutation(s) Bulk…")
-        driver = build_driver(bool(config.get("headless", False)))
+        driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
         for index, row in enumerate(rows):
             if is_stopped():
                 on_log("WARNING", "Bulk Mutation arrêté par l’utilisateur.")

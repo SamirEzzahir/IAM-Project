@@ -19,6 +19,8 @@ DEFAULT_CONFIG = {
     "test_login": "I10260472",
     "timeout_seconds": 20,
     "headless": False,
+    "debug_mode": False,
+    "action_delay_seconds": 0,
     "wiam_url": "",
     "wiam_username": "",
     "wiam_password": "",
@@ -57,6 +59,13 @@ def save_config(payload: dict) -> dict:
     if timeout < 5 or timeout > 120:
         raise ValueError("Le délai doit être compris entre 5 et 120 secondes.")
 
+    try:
+        action_delay = float(payload.get("action_delay_seconds", current["action_delay_seconds"]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Le délai Debug Selenium doit être un nombre.") from exc
+    if action_delay < 0 or action_delay > 60:
+        raise ValueError("Le délai Debug Selenium doit être compris entre 0 et 60 secondes.")
+
     wiam_url = str(payload.get("wiam_url", current["wiam_url"])).strip()
     if wiam_url and not wiam_url.startswith(("http://", "https://")):
         raise ValueError("L’URL WIAM doit commencer par http:// ou https://")
@@ -66,6 +75,8 @@ def save_config(payload: dict) -> dict:
         "test_login": login,
         "timeout_seconds": timeout,
         "headless": bool(payload.get("headless", current["headless"])),
+        "debug_mode": bool(payload.get("debug_mode", current["debug_mode"])),
+        "action_delay_seconds": action_delay,
         "wiam_url": wiam_url,
         "wiam_username": str(payload.get("wiam_username", current["wiam_username"])).strip(),
         "wiam_password": wiam_password,

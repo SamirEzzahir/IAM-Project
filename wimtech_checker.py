@@ -34,7 +34,24 @@ DIAGNOSTICS_DIR = BASE_DIR / "diagnostics"
 MAX_DIAGNOSTICS = 20
 
 
-def build_driver(headless: bool = False, *, ignore_certificate_errors: bool = False):
+def action_delay_from_config(config: dict) -> float:
+    """Return the configured per-action pause only while debug mode is enabled."""
+
+    return float(config.get("action_delay_seconds", 0) or 0) if config.get("debug_mode") else 0.0
+
+
+def selenium_action_delay(driver) -> None:
+    delay = float(getattr(driver, "_fb_action_delay_seconds", 0) or 0)
+    if delay > 0:
+        time.sleep(delay)
+
+
+def navigate(driver, url: str) -> None:
+    selenium_action_delay(driver)
+    driver.get(url)
+
+
+def build_driver(headless: bool = False, *, ignore_certificate_errors: bool = False, action_delay_seconds: float = 0):
     options = webdriver.ChromeOptions()
     chrome_binary = os.getenv("CHROME_BINARY")
     if chrome_binary:
@@ -54,7 +71,9 @@ def build_driver(headless: bool = False, *, ignore_certificate_errors: bool = Fa
     if os.getenv("CONTAINER", "0").lower() in {"1", "true", "yes"}:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-    return webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=options)
+    driver._fb_action_delay_seconds = max(0.0, float(action_delay_seconds or 0))
+    return driver
 
 
 def close_driver(driver) -> None:
@@ -93,7 +112,9 @@ def set_input(driver, element_id: str, value: str, timeout: int) -> None:
             field = WebDriverWait(driver, timeout).until(
                 EC.visibility_of_element_located((By.ID, element_id))
             )
+            selenium_action_delay(driver)
             field.clear()
+            selenium_action_delay(driver)
             field.send_keys(value)
             return
         except StaleElementReferenceException as exc:
@@ -103,6 +124,7 @@ def set_input(driver, element_id: str, value: str, timeout: int) -> None:
 
 
 def click_element(driver, element, timeout: int) -> None:
+    selenium_action_delay(driver)
     try:
         WebDriverWait(driver, timeout).until(lambda _: element.is_displayed() and element.is_enabled())
         element.click()
@@ -294,7 +316,7 @@ def prepare_pco_form(
     """
 
     timeout = int(config["timeout_seconds"])
-    driver.get(config["wimtech_url"])
+    navigate(driver, config["wimtech_url"])
     wait_document(driver, timeout)
 
     select_login_mode(driver, timeout)
@@ -391,9 +413,9 @@ def lookup_login_msan_port(config: dict, login: str) -> str:
     """Search a Login and return its normalized MSAN port mapping key."""
 
     timeout = int(config["timeout_seconds"])
-    driver = build_driver(bool(config.get("headless", False)))
+    driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
     try:
-        driver.get(config["wimtech_url"])
+        navigate(driver, config["wimtech_url"])
         wait_document(driver, timeout)
         select_login_mode(driver, timeout)
         set_input(driver, "frm:in_2", login, timeout)
@@ -628,7 +650,7 @@ def check_all_pcos(
     driver = None
     try:
         on_log("INFO", "Ouverture de Chrome et connexion à WimTech…")
-        driver = build_driver(bool(config.get("headless", False)))
+        driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
 
         def test_candidate(index: int, pco: str):
             wait_if_paused()

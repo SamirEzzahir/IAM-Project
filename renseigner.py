@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from wimtech_checker import (
     build_driver, close_driver, has_login_error, select_search_mode, set_input,
     submit_by_id, wait_document, wait_for_msan_port_from_equipment_table,
+    action_delay_from_config, navigate, selenium_action_delay,
 )
 from wimtech_bulk_mutator import ensure_in_progress_circuit_selected, has_command_error
 
@@ -20,6 +21,7 @@ def _wiam_login(driver, config: dict, timeout: int) -> None:
     if driver.find_elements(By.ID, "login"):
         set_input(driver, "login", config["wiam_username"], timeout)
         set_input(driver, "password", config["wiam_password"], timeout)
+        selenium_action_delay(driver)
         driver.execute_script("doLog();")
         WebDriverWait(driver, timeout).until(lambda current: not current.find_elements(By.ID, "login"))
 
@@ -28,7 +30,7 @@ def collect_wiam_login(driver, config: dict, command: str) -> str:
     timeout = int(config["timeout_seconds"])
     if not all(config.get(key) for key in ("wiam_url", "wiam_username", "wiam_password")):
         raise ValueError("Configurez l’URL, le Login et le mot de passe WIAM.")
-    driver.get(config["wiam_url"])
+    navigate(driver, config["wiam_url"])
     _wiam_login(driver, config, timeout)
     # WIAM often opens on Accueil even when the Commandes URL was requested.
     # Follow the same Commandes top-bar link that the user clicks manually.
@@ -42,20 +44,22 @@ def collect_wiam_login(driver, config: dict, command: str) -> str:
         )
         if not command_link:
             raise ValueError("Lien WIAM Commandes introuvable depuis la page Accueil.")
+        selenium_action_delay(driver)
         driver.execute_script("arguments[0].click();", command_link)
     field = WebDriverWait(driver, timeout).until(lambda current: current.find_element(By.NAME, "num_commande"))
     radios = driver.find_elements(By.CSS_SELECTOR, "input[type='radio'][value='1']")
     if radios and not radios[0].is_selected():
-        radios[0].click()
-    field.clear(); field.send_keys(command)
+        selenium_action_delay(driver); radios[0].click()
+    selenium_action_delay(driver); field.clear()
+    selenium_action_delay(driver); field.send_keys(command)
     buttons = driver.find_elements(By.ID, "xx")
     if buttons:
-        buttons[0].click()
+        selenium_action_delay(driver); buttons[0].click()
     else:
         link = next((item for item in driver.find_elements(By.TAG_NAME, "a") if "chercher" in (item.text or "").lower()), None)
         if not link:
             raise ValueError("Bouton Chercher WIAM introuvable.")
-        link.click()
+        selenium_action_delay(driver); link.click()
     cells = WebDriverWait(driver, timeout).until(lambda current: current.find_elements(By.CSS_SELECTOR, "td.datalistfield") or False)
     if len(cells) < 2 or not (cells[1].text or "").strip():
         raise ValueError(f"Aucun Login WIAM trouvé pour {command}.")
@@ -68,7 +72,7 @@ def collect_constitution(
     timeout = int(config["timeout_seconds"])
 
     def search(mode: str, value: str) -> bool:
-        driver.get(config["wimtech_url"])
+        navigate(driver, config["wimtech_url"])
         wait_document(driver, timeout)
         select_search_mode(driver, timeout, mode)
         set_input(driver, "frm:in_2", value, timeout)
@@ -134,6 +138,7 @@ def run_renseigner(*, config: dict, rows: list[dict], degroupage: dict, stopped:
     driver = build_driver(
         bool(config.get("headless", False)),
         ignore_certificate_errors=True,
+        action_delay_seconds=action_delay_from_config(config),
     )
     try:
         for index, row in enumerate(rows):

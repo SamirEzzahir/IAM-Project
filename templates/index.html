@@ -251,6 +251,8 @@
               <div class="field"><label for="testLogin">Login de test</label><input id="testLogin" name="test_login" type="text" required></div>
               <div class="field"><label for="timeoutSeconds">Délai maximum (secondes)</label><input id="timeoutSeconds" name="timeout_seconds" type="number" min="5" max="120" required></div>
               <label class="check-row"><input id="headless" name="headless" type="checkbox"><span>Exécuter Chrome en arrière-plan</span></label>
+              <label class="check-row"><input id="debugMode" type="checkbox"><span>Mode Debug Selenium</span></label>
+              <div id="debugDelayField" class="field is-hidden"><label for="actionDelaySeconds">Délai entre les actions (secondes)</label><input id="actionDelaySeconds" type="number" min="0" max="60" step="0.1" value="0"><small>0 = vitesse normale. Toute valeur positive ralentit chaque navigation, saisie et clic Selenium.</small></div>
               <div class="actions full"><button class="primary" type="submit">Enregistrer</button></div>
             </form>
             <div class="field full top-gap"><label for="msanMappingFile">Correspondance PORT MSAN → SPL</label><input id="msanMappingFile" type="file" accept=".xlsx,.xlsm,.csv"><small>Colonnes : Carte · Splitter ou SRO</small></div>
