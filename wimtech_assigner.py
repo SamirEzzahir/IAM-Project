@@ -85,7 +85,10 @@ def assign_one_pco(
         pco=pco,
     )
     if state == "MISSING":
-        cancel_current_pco(driver, min(timeout, 5))
+        # WimTech keeps the ODF/ZR/PCO study form open when it displays
+        # <span id="ot_1">Pas d'équipement installé...</span>. Do not
+        # cancel or navigate away: the caller can overwrite the three fields
+        # immediately for the next candidate.
         return {
             "status": "NOT_FOUND",
             "status_label": "Inexistant",
@@ -266,14 +269,20 @@ def assign_login_to_first_port(
                     pco=pco,
                     form_ready=current_form_ready,
                 )
+                # A missing-equipment response leaves the study form visible
+                # and ready. Reuse it directly for the 111./T alias or the
+                # following PCO instead of returning to the Login page.
+                next_form_ready = result.get("status") == "NOT_FOUND"
                 fallback = alternate_prefixed_pco(pco)
                 if result.get("status") == "NOT_FOUND" and fallback:
                     on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
                     used_pco = fallback
-                    if reuse_constitution_page:
+                    if reuse_constitution_page and not next_form_ready:
                         open_add_constitution_form(
                             driver, int(config["timeout_seconds"]), delete_existing=False
                         )
+                    fallback_form_ready = next_form_ready
+                    next_form_ready = False
                     result = assign_one_pco(
                         driver,
                         config,
@@ -281,8 +290,9 @@ def assign_login_to_first_port(
                         odf=odf,
                         zr=zr,
                         pco=fallback,
-                        form_ready=reuse_constitution_page,
+                        form_ready=fallback_form_ready,
                     )
+                    next_form_ready = result.get("status") == "NOT_FOUND"
             except ValueError:
                 # A missing/invalid Login is global to the job, not a PCO
                 # condition. Let the job fail once instead of repeating the
