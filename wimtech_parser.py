@@ -13,7 +13,9 @@ FIBRE_PORT_PATTERN = re.compile(r"^\s*(\d+)\s*\(FIBRE-", re.IGNORECASE)
 def normalize(value: str) -> str:
     text = unicodedata.normalize("NFD", str(value or ""))
     text = "".join(character for character in text if unicodedata.category(character) != "Mn")
-    text = text.replace("'", " ").replace("’", " ")
+    # WimTech may use several apostrophe forms in its validation spans.
+    for apostrophe in ("'", "’", "‘", "`"):
+        text = text.replace(apostrophe, " ")
     return " ".join(text.upper().split())
 
 
@@ -89,7 +91,23 @@ def build_msan_port_key(nom_usuel: str, ne: str) -> str:
 
 
 def is_equipment_missing(value: str) -> bool:
-    return "PAS D EQUIPEMENT INSTALLE AU NIVEAU DE CETTE GEOLOCALISATION" in normalize(value)
+    text = normalize(value)
+    exact_match = any(
+        message in text
+        for message in (
+            "PAS D EQUIPEMENT INSTALLE AU NIVEAU DE CETTE GEOLOCALISATION",
+            "AUCUN EQUIPEMENT INSTALLE AU NIVEAU DE CETTE GEOLOCALISATION",
+            "EQUIPEMENT NON INSTALLE AU NIVEAU DE CETTE GEOLOCALISATION",
+        )
+    )
+    if exact_match:
+        return True
+
+    # Some WimTech versions shorten the same span to "Pas d'équipement
+    # installé à cette géolocalisation". Match its stable business words.
+    missing_prefix = "PAS D EQUIPEMENT" in text or "AUCUN EQUIPEMENT" in text
+    missing_state = "INSTALLE" in text or "N EXISTE PAS" in text
+    return missing_prefix and missing_state and "GEOLOCALISATION" in text
 
 
 def base_result_confirms_existence(result: dict) -> bool:

@@ -83,6 +83,20 @@ class WimtechParserTests(unittest.TestCase):
             )
         )
 
+    def test_detects_missing_equipment_with_typographic_apostrophe(self):
+        self.assertTrue(
+            is_equipment_missing(
+                "Pas d’équipement installé au niveau de cette géolocalisation"
+            )
+        )
+
+    def test_detects_aucun_equipment_variant(self):
+        self.assertTrue(
+            is_equipment_missing(
+                "Aucun équipement installé au niveau de cette géolocalisation"
+            )
+        )
+
     def test_split_forms_are_skipped_only_when_base_existence_is_confirmed(self):
         self.assertTrue(base_result_confirms_existence({"pco_exists": True}))
         self.assertFalse(base_result_confirms_existence({"pco_exists": False}))
