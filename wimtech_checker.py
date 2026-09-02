@@ -409,6 +409,28 @@ def wait_for_msan_port_from_equipment_table(driver, timeout: int) -> str:
             raise table_error from exc
 
 
+def open_login_constitution(driver, config: dict, login: str) -> str:
+    """Open a Login's constitution and return its normalized MSAN port key."""
+
+    timeout = int(config["timeout_seconds"])
+    navigate(driver, config["wimtech_url"])
+    wait_document(driver, timeout)
+    select_login_mode(driver, timeout)
+    set_input(driver, "frm:in_2", login, timeout)
+    submit_by_id(driver, "frm:bt_1", timeout)
+    WebDriverWait(driver, timeout).until(
+        lambda current: has_login_error(current)
+        or bool(current.find_elements(By.ID, "frm:bt_2"))
+    )
+    if has_login_error(driver):
+        raise ValueError(f"Login {login} introuvable ou sans circuit associé.")
+    submit_by_id(driver, "frm:bt_2", timeout)
+    WebDriverWait(driver, timeout).until(
+        EC.presence_of_element_located((By.ID, "frm:constitutionList"))
+    )
+    return wait_for_msan_port_from_equipment_table(driver, timeout)
+
+
 def lookup_login_msan_port(config: dict, login: str) -> str:
     """Search a Login and return its normalized MSAN port mapping key."""
 

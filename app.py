@@ -37,7 +37,10 @@ from result_excel import assignment_results_excel, available_pcos_excel, renseig
 from renseigner import run_renseigner
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
-from wimtech_checker import check_all_pcos, lookup_login_msan_port
+from wimtech_checker import (
+    action_delay_from_config, build_driver, check_all_pcos, close_driver,
+    open_add_constitution_form, open_login_constitution,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -414,31 +417,68 @@ def run_assignment_job(job_id: str) -> None:
         prune_memory_jobs()
 
 
+def assignment_exhausted_message(results: list[dict]) -> str:
+    """Summarize saturated and not-yet-created PCO candidates."""
+
+    missing, saturated, other = [], [], []
+    for item in results:
+        status = item.get("status")
+        pco = item.get("source_pco") or item.get("pco")
+        if status == "NOT_FOUND" and pco and pco not in missing:
+            missing.append(pco)
+        elif status == "SATURATED" and pco and pco not in saturated:
+            saturated.append(pco)
+        elif status not in {"SKIPPED", "NOT_FOUND", "SATURATED"}:
+            other.append(item)
+    if saturated and missing and not other:
+        return "Toutes les PCOs existantes sont saturées, et les PCOs " + ", ".join(missing) + " ne sont pas encore créées."
+    if saturated and not missing and not other:
+        return "Toutes les PCOs sont saturées / SPL saturé."
+    if missing and not other:
+        return "PCOs non encore créées : " + ", ".join(missing) + "."
+    return "Aucun port utilisable trouvé. Consultez le détail des PCOs testées."
+
+
 def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> dict:
     if row.get("validation_error"):
         return {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
-    if not row.get("spl"):
-        msan_port = lookup_login_msan_port(load_config(), row["login"])
-        resolved_spl = resolve_msan_spl(MSAN_MAPPING_PATH, msan_port)
-        if not resolved_spl:
-            raise ValueError(f"Aucun SPL configuré pour le port MSAN {msan_port}.")
-        row["msan_port"], row["spl"] = msan_port, resolved_spl
-    spl_data = parse_spl(row["spl"]).to_dict()
-    detail_results = []
-    add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
-    assigned = assign_login_to_first_port(
-        config=load_config(), login=row["login"], odf=spl_data["odf"],
-        zr=spl_data["zr"], candidates=spl_data["pco_candidates"],
-        is_stopped=stop_event.is_set,
-        on_log=lambda level, message: add_log(job_id, level, message),
-        on_result=lambda _i, item: detail_results.append(item),
-    )
+    config = load_config()
+    driver = None
+    reuse_current_constitution = False
+    try:
+        if not row.get("spl"):
+            driver = build_driver(
+                bool(config.get("headless", False)),
+                action_delay_seconds=action_delay_from_config(config),
+            )
+            msan_port = open_login_constitution(driver, config, row["login"])
+            resolved_spl = resolve_msan_spl(MSAN_MAPPING_PATH, msan_port)
+            if not resolved_spl:
+                raise ValueError(f"Aucun SPL configuré pour le port MSAN {msan_port}.")
+            row["msan_port"], row["spl"] = msan_port, resolved_spl
+            open_add_constitution_form(
+                driver, int(config["timeout_seconds"]), delete_existing=True
+            )
+            reuse_current_constitution = True
+        spl_data = parse_spl(row["spl"]).to_dict()
+        detail_results = []
+        add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
+        assigned = assign_login_to_first_port(
+            config=config, login=row["login"], odf=spl_data["odf"],
+            zr=spl_data["zr"], candidates=spl_data["pco_candidates"],
+            is_stopped=stop_event.is_set,
+            on_log=lambda level, message: add_log(job_id, level, message),
+            on_result=lambda _i, item: detail_results.append(item),
+            driver=driver, initial_form_ready=reuse_current_constitution,
+        )
+    finally:
+        close_driver(driver)
     uncertain = next((item for item in detail_results if item.get("status") == "MUTATION_UNKNOWN"), None)
     if assigned:
         return {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
     if uncertain:
         return {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
-    return {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": "Aucun port utilisable trouvé."}
+    return {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": assignment_exhausted_message(detail_results)}
 
 
 def run_batch_assignment_job(job_id: str) -> None:

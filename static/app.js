@@ -288,7 +288,10 @@ function renderAssignmentJob(job) {
   if (job.status === "COMPLETED" && assigned) {
     $("assignMessage").innerHTML = `<div class="success"><strong>Affectation terminée.</strong> Login ${escapeHtml(job.login)} affecté à <span class="pco-code">${escapeHtml(assigned.pco)}</span>, port <strong>${escapeHtml(assigned.selected_port)}</strong>.</div>`;
   } else if (job.status === "COMPLETED") {
-    $("assignMessage").innerHTML = '<div class="warning"><strong>Aucun port utilisable.</strong> Consultez la liste complète ci-dessous pour voir les PCO saturés, inexistants ou ignorés.</div>';
+    const summaries = [...new Set((job.results || []).filter((row) => row.status === "NO_PORT").map((row) => row.message).filter(Boolean))];
+    $("assignMessage").innerHTML = summaries.length
+      ? `<div class="warning"><strong>Aucun port utilisable.</strong><br>${summaries.map(escapeHtml).join("<br>")}</div>`
+      : '<div class="warning"><strong>Aucun port utilisable.</strong> Consultez la liste complète ci-dessous pour voir les PCO saturés, inexistants ou ignorés.</div>';
   } else if (job.status === "REVIEW_REQUIRED") {
     $("assignMessage").innerHTML = '<div class="error"><strong>Contrôle manuel obligatoire.</strong> La mutation a commencé mais sa confirmation finale est incertaine. Vérifiez WimTech avant de relancer.</div>';
   } else if (job.status === "ERROR") {

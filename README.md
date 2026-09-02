@@ -361,7 +361,7 @@ sudo git clone https://github.com/SamirEzzahir/IAM-Project.git
 cd IAM-Project
 sudo env APP_PASSWORD='choisir-un-mot-de-passe-fort' docker compose up -d --build
 ```
-
+  
 ### Mise à jour
 
 Le fichier `data/msan_spl_mapping.json` peut être modifié par l'application.

@@ -20,6 +20,7 @@ from wimtech_checker import (
     click_element,
     has_no_available_fibre_port,
     open_active_cable,
+    open_add_constitution_form,
     prepare_pco_form,
     save_diagnostic,
     submit_pco_location,
@@ -68,15 +69,13 @@ def assign_one_pco(
     odf: str,
     zr: str,
     pco: str,
+    form_ready: bool = False,
 ) -> dict:
     """Inspect one PCO and complete the mutation on its first usable port."""
 
     timeout = int(config["timeout_seconds"])
-    deleted_count = prepare_pco_form(
-        driver,
-        config,
-        login=login,
-        delete_existing=True,
+    deleted_count = 0 if form_ready else prepare_pco_form(
+        driver, config, login=login, delete_existing=True,
     )
     state, used_odf = submit_pco_location(
         driver,
@@ -206,23 +205,33 @@ def assign_login_to_first_port(
     is_stopped: Callable[[], bool],
     on_log: Callable[[str, str], None],
     on_result: Callable[[int, dict], None],
+    driver=None,
+    initial_form_ready: bool = False,
 ) -> dict | None:
     """Try candidate PCOs in order and stop after the first confirmed mutation."""
 
-    driver = None
+    owns_driver = driver is None
+    reuse_constitution_page = not owns_driver
+    next_form_ready = initial_form_ready
     assigned_result = None
     halted = False
     try:
         on_log("INFO", f"Ouverture de Chrome pour l’affectation du Login {login}…")
-        driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
+        if owns_driver:
+            driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
 
         def test_candidate(index: int, pco: str) -> dict | None:
+            nonlocal next_form_ready
             if is_stopped():
                 return None
             on_log("INFO", f"Test {index + 1}/{len(candidates)} : {pco}")
             started_at = time.monotonic()
             used_pco = pco
             try:
+                if reuse_constitution_page and not next_form_ready:
+                    open_add_constitution_form(
+                        driver, int(config["timeout_seconds"]), delete_existing=False
+                    )
                 result = assign_one_pco(
                     driver,
                     config,
@@ -230,11 +239,17 @@ def assign_login_to_first_port(
                     odf=odf,
                     zr=zr,
                     pco=pco,
+                    form_ready=next_form_ready,
                 )
+                next_form_ready = False
                 fallback = alternate_prefixed_pco(pco)
                 if result.get("status") == "NOT_FOUND" and fallback:
                     on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
                     used_pco = fallback
+                    if reuse_constitution_page:
+                        open_add_constitution_form(
+                            driver, int(config["timeout_seconds"]), delete_existing=False
+                        )
                     result = assign_one_pco(
                         driver,
                         config,
@@ -242,6 +257,7 @@ def assign_login_to_first_port(
                         odf=odf,
                         zr=zr,
                         pco=fallback,
+                        form_ready=reuse_constitution_page,
                     )
             except ValueError:
                 # A missing/invalid Login is global to the job, not a PCO
@@ -354,5 +370,6 @@ def assign_login_to_first_port(
             on_log("WARNING", "Aucun port utilisable trouvé dans les PCO possibles.")
         return assigned_result
     finally:
-        close_driver(driver)
-        on_log("INFO", "Session Chrome d’affectation fermée.")
+        if owns_driver:
+            close_driver(driver)
+            on_log("INFO", "Session Chrome d’affectation fermée.")
