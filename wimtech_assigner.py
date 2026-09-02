@@ -140,6 +140,10 @@ def assign_one_pco(
         if not wait_for_action_or_port_error(driver, timeout, "frm:v_but_ano"):
             raise NoPortAvailableError
     except NoPortAvailableError:
+        # The business error leaves Chrome inside the current mutation flow.
+        # Return to the constitution page so the same session can test the
+        # next candidate PCO.
+        cancel_current_pco(driver, min(timeout, 8))
         return {
             "status": "SATURATED",
             "status_label": "Port indisponible",
@@ -152,6 +156,7 @@ def assign_one_pco(
         }
     except Exception:
         if has_no_available_fibre_port(driver):
+            cancel_current_pco(driver, min(timeout, 8))
             return {
                 "status": "SATURATED", "status_label": "Port indisponible",
                 "pco_exists": True, "selected_port": port,
@@ -229,9 +234,29 @@ def assign_login_to_first_port(
             used_pco = pco
             try:
                 if reuse_constitution_page and not next_form_ready:
-                    open_add_constitution_form(
-                        driver, int(config["timeout_seconds"]), delete_existing=False
-                    )
+                    try:
+                        open_add_constitution_form(
+                            driver, int(config["timeout_seconds"]), delete_existing=False
+                        )
+                    except TimeoutException:
+                        # If the preceding candidate timed out while WimTech
+                        # was changing pages, restore a known state. This is a
+                        # recovery path only; the normal flow keeps the same
+                        # Login session and opens Ajouter directly.
+                        on_log(
+                            "WARNING",
+                            "Page WimTech non synchronisée : reprise de la recherche du Login.",
+                        )
+                        prepare_pco_form(
+                            driver, config, login=login, delete_existing=False,
+                        )
+                        next_form_ready = True
+
+                # Consume this one-use flag before Selenium starts. If an
+                # exception occurs, the following candidate must restore/open
+                # the form instead of reusing the blocked page.
+                current_form_ready = next_form_ready
+                next_form_ready = False
                 result = assign_one_pco(
                     driver,
                     config,
@@ -239,9 +264,8 @@ def assign_login_to_first_port(
                     odf=odf,
                     zr=zr,
                     pco=pco,
-                    form_ready=next_form_ready,
+                    form_ready=current_form_ready,
                 )
-                next_form_ready = False
                 fallback = alternate_prefixed_pco(pco)
                 if result.get("status") == "NOT_FOUND" and fallback:
                     on_log("INFO", f"{pco} introuvable : nouvel essai avec {fallback}")
@@ -265,6 +289,12 @@ def assign_login_to_first_port(
                 # same research for all candidates.
                 raise
             except TimeoutException:
+                # Best effort: Annuler usually brings the browser back from
+                # the PCO form to the constitution page. The next iteration
+                # will then click Ajouter; otherwise it uses the recovery path
+                # above and researches the Login once.
+                cancel_current_pco(driver, min(int(config["timeout_seconds"]), 8))
+                next_form_ready = False
                 result = {
                     "status": "ERROR",
                     "status_label": "Erreur",

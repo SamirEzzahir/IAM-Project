@@ -478,7 +478,11 @@ def submit_pco_location(
         set_input(driver, "fr:inputOdf", candidate_odf, timeout)
         set_input(driver, "fr:inputZro", zr, timeout)
         set_input(driver, "fr:inputEquipAmont", candidate_pco, timeout)
-        submit_by_id(driver, "fr:b_et", timeout)
+        # The study action may update the current JSF document without making
+        # the old <html> element stale. Waiting for a full reload here can look
+        # like a freeze for the entire configured timeout. Click, then let
+        # wait_state() observe the actual WimTech business result directly.
+        click(driver, "fr:b_et", timeout)
 
     def wait_state():
         return WebDriverWait(driver, timeout).until(
