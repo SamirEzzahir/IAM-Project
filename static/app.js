@@ -9,8 +9,46 @@ let currentBulkJobId = null;
 let bulkPollTimer = null;
 let currentRenseignerJobId = null;
 let renseignerPollTimer = null;
+let latestRenseignerRows = [];
+
+const tablePageState = {};
+const TABLE_PAGE_SIZE = 50;
 
 const $ = (id) => document.getElementById(id);
+
+function renderPaginatedTable(key, tbodyId, rows, rowRenderer, emptyHtml) {
+  const body = $(tbodyId);
+  const totalPages = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const page = Math.min(Math.max(1, tablePageState[key] || 1), totalPages);
+  tablePageState[key] = page;
+  const start = (page - 1) * TABLE_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + TABLE_PAGE_SIZE);
+  body.innerHTML = pageRows.length
+    ? pageRows.map((row, index) => rowRenderer(row, start + index)).join("")
+    : emptyHtml;
+
+  const paginationId = `${tbodyId}Pagination`;
+  let pagination = $(paginationId);
+  if (!pagination) {
+    pagination = document.createElement("div");
+    pagination.id = paginationId;
+    pagination.className = "table-pagination";
+    body.closest(".results").appendChild(pagination);
+  }
+  pagination.innerHTML = rows.length > TABLE_PAGE_SIZE ? `
+    <button class="secondary" type="button" data-page="prev" ${page === 1 ? "disabled" : ""}>← Précédent</button>
+    <span>Page <strong>${page}</strong> / ${totalPages} · ${rows.length} ligne(s)</span>
+    <button class="secondary" type="button" data-page="next" ${page === totalPages ? "disabled" : ""}>Suivant →</button>
+  ` : rows.length ? `<span>${rows.length} ligne(s)</span>` : "";
+  pagination.querySelector('[data-page="prev"]')?.addEventListener("click", () => {
+    tablePageState[key] = page - 1;
+    renderPaginatedTable(key, tbodyId, rows, rowRenderer, emptyHtml);
+  });
+  pagination.querySelector('[data-page="next"]')?.addEventListener("click", () => {
+    tablePageState[key] = page + 1;
+    renderPaginatedTable(key, tbodyId, rows, rowRenderer, emptyHtml);
+  });
+}
 
 // Delegate navigation at document level so the side menu remains usable even
 // if a later, feature-specific control is absent or fails during startup.
@@ -142,11 +180,7 @@ function statusClass(status) {
 }
 
 function renderRows(rows) {
-  if (!rows?.length) {
-    $("resultsBody").innerHTML = '<tr><td colspan="7" class="empty"><strong>Aucun contrôle lancé</strong><span>Saisissez un SPL puis lancez la vérification.</span></td></tr>';
-    return;
-  }
-  $("resultsBody").innerHTML = rows.map((row, index) => `
+  renderPaginatedTable("check", "resultsBody", rows || [], (row, index) => `
     <tr>
       <td>${String(index + 1).padStart(2, "0")}</td>
       <td class="pco-code">${escapeHtml(row.pco)}</td>
@@ -156,7 +190,7 @@ function renderRows(rows) {
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
     </tr>
-  `).join("");
+  `, '<tr><td colspan="7" class="empty"><strong>Aucun contrôle lancé</strong><span>Saisissez un SPL puis lancez la vérification.</span></td></tr>');
 }
 
 function renderLogs(logs) {
@@ -174,11 +208,7 @@ function renderLogs(logs) {
 
 function renderAssignmentRows(job) {
   const rows = job?.results || [];
-  if (!rows?.length) {
-    $("assignResultsBody").innerHTML = '<tr><td colspan="9" class="empty"><strong>Aucune affectation lancée</strong><span>Sélectionnez un mode d\'affectation.</span></td></tr>';
-    return;
-  }
-  $("assignResultsBody").innerHTML = rows.map((row, index) => {
+  renderPaginatedTable("assignment", "assignResultsBody", rows, (row, index) => {
     const login = row.login || job.login || "";
     const spl = row.spl || job.spl || "";
     return `
@@ -193,7 +223,7 @@ function renderAssignmentRows(job) {
       <td class="pco-code">${escapeHtml(row.msan_port || "")}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
     </tr>
-  `; }).join("");
+  `; }, '<tr><td colspan="9" class="empty"><strong>Aucune affectation lancée</strong><span>Sélectionnez un mode d\'affectation.</span></td></tr>');
 }
 
 function selectedAssignmentMode() {
@@ -415,11 +445,7 @@ async function uploadMsanMapping() {
 }
 
 function renderBulkRows(rows) {
-  if (!rows?.length) {
-    $("bulkResultsBody").innerHTML = '<tr><td colspan="13" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>';
-    return;
-  }
-  $("bulkResultsBody").innerHTML = rows.map((row) => `
+  renderPaginatedTable("bulk", "bulkResultsBody", rows || [], (row) => `
     <tr>
       <td>${escapeHtml(row.excel_row || "—")}</td>
       <td class="pco-code">${escapeHtml(row.command || "—")}</td>
@@ -435,7 +461,7 @@ function renderBulkRows(rows) {
       <td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td>
       <td class="message-cell">${escapeHtml(row.message || "—")}</td>
     </tr>
-  `).join("");
+  `, '<tr><td colspan="13" class="empty"><strong>Aucun fichier traité</strong><span>Sélectionnez un fichier Excel puis lancez Bulk Mutation.</span></td></tr>');
 }
 
 function renderBulkLogs(logs) {
@@ -561,10 +587,11 @@ function updateBulkFileMeta() {
 
 function renseignerMode() { return document.querySelector('input[name="renseignerMode"]:checked').value; }
 function renderRenseigner(job) {
+  latestRenseignerRows = job.results || [];
   $("renseignerStatusBadge").textContent = job.status === "COMPLETED" ? "Terminé" : job.status === "RUNNING" ? "En cours" : job.status;
   $("renseignerStatusBadge").className = `badge ${job.status === "COMPLETED" ? "ok" : job.status === "ERROR" ? "error" : "neutral"}`;
   $("renseignerProgressBar").style.width = `${job.progress_percent || 0}%`;
-  $("renseignerResultsBody").innerHTML = (job.results || []).map((row) => `<tr><td>${row.excel_row}</td><td>${escapeHtml(row.input)}</td><td>${escapeHtml(row.login || "—")}</td><td>${escapeHtml(row.source || "—")}</td><td>${escapeHtml(row.constitution_search_mode || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_spl || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_pco || "—")}</td><td>${escapeHtml(row.constitution_brin || "—")}</td><td class="pco-code">${escapeHtml(row.msan_port || "—")}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`).join("") || '<tr><td colspan="12" class="empty"><strong>Aucune collecte lancée</strong></td></tr>';
+  renderPaginatedTable("renseigner", "renseignerResultsBody", latestRenseignerRows, (row) => `<tr><td>${row.excel_row}</td><td>${escapeHtml(row.input)}</td><td>${escapeHtml(row.login || "—")}</td><td>${escapeHtml(row.source || "—")}</td><td>${escapeHtml(row.constitution_search_mode || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_spl || "—")}</td><td class="pco-code">${escapeHtml(row.constitution_pco || "—")}</td><td>${escapeHtml(row.constitution_brin || "—")}</td><td class="pco-code">${escapeHtml(row.msan_port || "—")}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`, '<tr><td colspan="12" class="empty"><strong>Aucune collecte lancée</strong></td></tr>');
   $("renseignerLog").innerHTML = (job.logs || []).map((line) => `<div class="log-line ${escapeHtml(line.level.toLowerCase())}"><time>${escapeHtml(formatTime(line.time))}</time><span>${escapeHtml(line.message)}</span></div>`).join("");
   const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
   $("renseignerStartBtn").disabled = active; $("renseignerStopBtn").disabled = !active;
@@ -574,8 +601,8 @@ async function pollRenseigner() { if (!currentRenseignerJobId) return; try { con
 async function startRenseigner() { const values = $("renseignerValues").value.trim(); if (!values) return toast("Saisissez au moins une valeur."); try { const data = await api("/api/renseigner/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: renseignerMode(), values }) }); currentRenseignerJobId = data.job_id; renderRenseigner(data.job); renseignerPollTimer = setInterval(pollRenseigner, 900); } catch (error) { $("renseignerMessage").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; } }
 async function stopRenseigner() { if (currentRenseignerJobId) await api(`/api/renseigner/${currentRenseignerJobId}/stop`, { method: "POST" }); }
 function updateRenseignerMode() { const mode = renseignerMode(); $("renseignerValuesLabel").textContent = mode === "LOGIN" ? "Liste de Logins" : "Liste de CMD"; $("renseignerValues").placeholder = mode === "LOGIN" ? "Un Login par ligne" : "Un CMD par ligne"; }
-function clearRenseigner() { currentRenseignerJobId = null; clearInterval(renseignerPollTimer); $("renseignerValues").value = ""; $("renseignerResultsBody").innerHTML = '<tr><td colspan="12" class="empty"><strong>Aucune collecte lancée</strong></td></tr>'; $("renseignerLog").innerHTML = ""; $("renseignerStatusBadge").textContent = "En attente"; $("renseignerDownloadBtn").classList.add("disabled"); }
-function copyRenseignerLogins() { const logins = [...document.querySelectorAll("#renseignerResultsBody tr")].map((row) => row.cells?.[2]?.textContent.trim()).filter((value) => value && value !== "—"); if (!logins.length) return toast("Aucun Login extrait à copier."); document.querySelector('input[name="renseignerMode"][value="LOGIN"]').checked = true; updateRenseignerMode(); $("renseignerValues").value = [...new Set(logins)].join("\n"); toast(`${logins.length} Login(s) copiés vers l’étape Login.`); }
+function clearRenseigner() { currentRenseignerJobId = null; latestRenseignerRows = []; clearInterval(renseignerPollTimer); $("renseignerValues").value = ""; renderPaginatedTable("renseigner", "renseignerResultsBody", [], () => "", '<tr><td colspan="12" class="empty"><strong>Aucune collecte lancée</strong></td></tr>'); $("renseignerLog").innerHTML = ""; $("renseignerStatusBadge").textContent = "En attente"; $("renseignerDownloadBtn").classList.add("disabled"); }
+function copyRenseignerLogins() { const logins = latestRenseignerRows.map((row) => String(row.login || "").trim()).filter(Boolean); if (!logins.length) return toast("Aucun Login extrait à copier."); document.querySelector('input[name="renseignerMode"][value="LOGIN"]').checked = true; updateRenseignerMode(); $("renseignerValues").value = [...new Set(logins)].join("\n"); toast(`${logins.length} Login(s) copiés vers l’étape Login.`); }
 
 async function uploadDegroupage() { const file = $("degroupageFile").files[0]; if (!file) return toast("Sélectionnez le fichier Degroupage."); const form = new FormData(); form.append("file", file); try { const data = await api("/api/config/degroupage", { method: "POST", body: form }); toast(`${data.count} CMD Degroupage importés.`); } catch (error) { toast(error.message); } }
 
@@ -720,9 +747,9 @@ async function loadLatestAvailable() {
     $("availableMeta").innerHTML = data.spl
       ? `<strong>SPL ${escapeHtml(data.spl)}</strong> · ${availableCount} brin(s) disponible(s) · ${notCreatedCount} PCO non créé(s) · sauvegarde ${escapeHtml(formatDate(data.saved_at))}`
       : "Aucun résultat disponible pour le moment.";
-    $("availableBody").innerHTML = rows.length ? rows.map((row, index) => `
+    renderPaginatedTable("available", "availableBody", rows, (row, index) => `
       <tr><td>${String(index + 1).padStart(2, "0")}</td><td class="pco-code">${escapeHtml(data.spl || "—")}</td><td class="pco-code">${escapeHtml(row.pco)}</td><td><strong>${escapeHtml(row.brin || "—")}</strong></td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${escapeHtml(formatDate(row.checked_at))}</td></tr>
-    `).join("") : '<tr><td colspan="6" class="empty"><strong>Aucun PCO disponible</strong></td></tr>';
+    `, '<tr><td colspan="6" class="empty"><strong>Aucun PCO disponible</strong></td></tr>');
     const link = $("downloadCsv");
     const exportJobId = data.job_id || currentJobId;
     link.href = exportJobId && rows.length ? `/api/check/${exportJobId}/available.csv` : "#";

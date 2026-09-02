@@ -109,6 +109,8 @@ button:disabled, .button-link.disabled { border-color: #e1e4e8 !important; backg
 .progress-track { height: 8px; margin: 0 22px 17px; overflow: hidden; border-radius: 999px; background: #e9ecef; }
 .progress-track > div { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--red), var(--red-dark)); transition: width .25s ease; }
 .results { max-width: 100%; overflow: auto; border: 1px solid #dee2e6; border-radius: 9px; background: #fff; }
+.table-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; min-width: 100%; padding: 14px 8px; box-sizing: border-box; color: var(--muted); font-size: 13px; }
+.table-pagination .secondary { padding: 7px 12px; }
 .results-card .results { border-width: 1px 0 0; border-radius: 0 0 11px 11px; }
 table { width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 12px; }
 .bulk-table { min-width: 1450px; }
