@@ -10,6 +10,8 @@ let bulkPollTimer = null;
 let currentRenseignerJobId = null;
 let renseignerPollTimer = null;
 let latestRenseignerRows = [];
+let currentCommandesJobId = null;
+let commandesPollTimer = null;
 
 const tablePageState = {};
 const TABLE_PAGE_SIZE = 50;
@@ -111,6 +113,7 @@ function switchTab(name) {
     assign: ["FB EMM · Affectation automatique", "Mutation du Login vers le premier port utilisable"],
     bulk: ["FB EMM · Bulk Mutation CMD&Login", "Mutation Excel avec PCO et brin exacts"],
     renseigner: ["FB EMM · Renseigner PCOs", "Collecte des Logins et constitutions actuelles"],
+    commandes: ["FB EMM · Collecte données ConnectFlow", "Collecte PCO, splitter et ONT par CMD"],
     available: ["FB EMM · PCO disponibles", "Collection des ports disponibles pour les prochaines fonctions"],
     config: ["FB EMM · Configuration", "Paramètres locaux de WimTech et Selenium"],
   };
@@ -607,6 +610,52 @@ function updateRenseignerMode() { const mode = renseignerMode(); $("renseignerVa
 function clearRenseigner() { currentRenseignerJobId = null; latestRenseignerRows = []; clearInterval(renseignerPollTimer); $("renseignerValues").value = ""; renderPaginatedTable("renseigner", "renseignerResultsBody", [], () => "", '<tr><td colspan="12" class="empty"><strong>Aucune collecte lancée</strong></td></tr>'); $("renseignerLog").innerHTML = ""; $("renseignerStatusBadge").textContent = "En attente"; $("renseignerDownloadBtn").classList.add("disabled"); }
 function copyRenseignerLogins() { const logins = latestRenseignerRows.map((row) => String(row.login || "").trim()).filter(Boolean); if (!logins.length) return toast("Aucun Login extrait à copier."); document.querySelector('input[name="renseignerMode"][value="LOGIN"]').checked = true; updateRenseignerMode(); $("renseignerValues").value = [...new Set(logins)].join("\n"); toast(`${logins.length} Login(s) copiés vers l’étape Login.`); }
 
+function renderCommandes(job) {
+  const rows = job.results || [];
+  const labels = { QUEUED: "Préparation", RUNNING: "En cours", STOPPING: "Arrêt…", STOPPED: "Arrêté", COMPLETED: "Terminé", ERROR: "Erreur" };
+  $("commandesStatusBadge").textContent = labels[job.status] || job.status;
+  $("commandesStatusBadge").className = `badge ${job.status === "COMPLETED" ? "ok" : job.status === "ERROR" ? "error" : "neutral"}`;
+  $("commandesProgressBar").style.width = `${job.progress_percent || 0}%`;
+  renderPaginatedTable("commandes", "commandesResultsBody", rows, (row) => `<tr><td>${escapeHtml(row.cmd)}</td><td>${escapeHtml(row.nom_splitter || "—")}</td><td>${escapeHtml(row.port_pco || "—")}</td><td class="pco-code">${escapeHtml(row.nom_pco || "—")}</td><td>${escapeHtml(row.modele_ont || "—")}</td><td>${escapeHtml(row.client_contacte || "—")}</td><td>${escapeHtml(row.distance_branchement || "—")}</td><td><span class="row-status ${statusClass(row.status)}">${escapeHtml(row.status_label)}</span></td><td>${row.duration_seconds == null ? "—" : `${Number(row.duration_seconds).toFixed(1)} s`}</td><td class="message-cell">${escapeHtml(row.message || "—")}</td></tr>`, '<tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr>');
+  $("commandesLog").innerHTML = (job.logs || []).map((line) => `<div class="log-line ${escapeHtml(line.level.toLowerCase())}"><time>${escapeHtml(formatTime(line.time))}</time><span>${escapeHtml(line.message)}</span></div>`).join("");
+  $("commandesLog").scrollTop = $("commandesLog").scrollHeight;
+  const active = ["QUEUED", "RUNNING", "STOPPING"].includes(job.status);
+  $("commandesStartBtn").disabled = active;
+  $("commandesStopBtn").disabled = !active;
+  $("commandesDownloadBtn").href = !active ? `/api/commandes/${job.job_id}/result.xlsx` : "#";
+  $("commandesDownloadBtn").classList.toggle("disabled", active);
+  if (job.status === "ERROR") $("commandesMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(job.error || "Collecte interrompue.")}</div>`;
+  else if (job.status === "COMPLETED") $("commandesMessage").innerHTML = `<div class="success"><strong>Collecte terminée.</strong> ${job.completed_count} / ${job.total} CMD traitée(s).</div>`;
+  else if (job.status === "RUNNING" && job.completed_count === 0) $("commandesMessage").innerHTML = '<div class="warning"><strong>Regardez Chrome.</strong> Saisissez le code temporaire pendant le compte à rebours de 10 secondes.</div>';
+}
+
+async function pollCommandes() {
+  if (!currentCommandesJobId) return;
+  try {
+    const data = await api(`/api/commandes/${currentCommandesJobId}`);
+    renderCommandes(data.job);
+    if (["COMPLETED", "STOPPED", "ERROR"].includes(data.job.status)) {
+      clearInterval(commandesPollTimer); commandesPollTimer = null;
+    }
+  } catch (error) { toast(error.message); }
+}
+
+async function startCommandes() {
+  const commands = $("commandesValues").value.trim();
+  if (!commands) return toast("Saisissez au moins une CMD.");
+  try {
+    const data = await api("/api/commandes/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commands }) });
+    currentCommandesJobId = data.job_id;
+    renderCommandes(data.job);
+    clearInterval(commandesPollTimer);
+    commandesPollTimer = setInterval(pollCommandes, 700);
+    pollCommandes();
+  } catch (error) { $("commandesMessage").innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(error.message)}</div>`; }
+}
+
+async function stopCommandes() { if (currentCommandesJobId) await api(`/api/commandes/${currentCommandesJobId}/stop`, { method: "POST" }); }
+function clearCommandes() { currentCommandesJobId = null; clearInterval(commandesPollTimer); commandesPollTimer = null; $("commandesValues").value = ""; $("commandesMessage").innerHTML = ""; $("commandesLog").innerHTML = ""; $("commandesStatusBadge").textContent = "En attente"; $("commandesProgressBar").style.width = "0%"; $("commandesDownloadBtn").classList.add("disabled"); renderPaginatedTable("commandes", "commandesResultsBody", [], () => "", '<tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr>'); }
+
 async function uploadDegroupage() { const file = $("degroupageFile").files[0]; if (!file) return toast("Sélectionnez le fichier Degroupage."); const form = new FormData(); form.append("file", file); try { const data = await api("/api/config/degroupage", { method: "POST", body: form }); toast(`${data.count} CMD Degroupage importés.`); } catch (error) { toast(error.message); } }
 
 async function previewBulkFile() {
@@ -778,6 +827,7 @@ async function loadConfig() {
     updateDebugMode();
     $("wiamUrl").value = config.wiam_url || "";
     $("wiamUsername").value = config.wiam_username || "";
+    $("commandesUrl").value = config.commandes_url || "https://10.96.18.189/commandes";
   } catch (error) {
     toast(error.message);
   }
@@ -803,6 +853,7 @@ async function saveConfiguration(event) {
         debug_mode: $("debugMode").checked,
         action_delay_seconds: Number($("actionDelaySeconds").value || 0),
         wiam_url: $("wiamUrl").value.trim(), wiam_username: $("wiamUsername").value.trim(), wiam_password: $("wiamPassword").value,
+        commandes_url: $("commandesUrl").value.trim(),
       }),
     });
     toast("Configuration enregistrée.");
@@ -843,6 +894,10 @@ $("renseignerStartBtn").addEventListener("click", startRenseigner);
 $("renseignerStopBtn").addEventListener("click", stopRenseigner);
 $("renseignerClearBtn").addEventListener("click", clearRenseigner);
 $("renseignerCopyLoginsBtn").addEventListener("click", copyRenseignerLogins);
+$("commandesStartBtn").addEventListener("click", startCommandes);
+$("commandesStopBtn").addEventListener("click", stopCommandes);
+$("commandesClearBtn").addEventListener("click", clearCommandes);
+$("commandesDownloadBtn").addEventListener("click", (event) => { if (event.currentTarget.classList.contains("disabled")) event.preventDefault(); });
 document.querySelectorAll('input[name="renseignerMode"]').forEach((radio) => radio.addEventListener("change", updateRenseignerMode));
 $("assignBatchFile").addEventListener("change", previewAssignmentBatchFile);
 $("bulkFileInput").addEventListener("change", previewBulkFile);

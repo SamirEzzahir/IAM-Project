@@ -68,3 +68,23 @@ def renseigner_results_excel(job: dict) -> bytes:
     for row in job.get("results", []):
         sheet.append([row.get("excel_row"), row.get("input"), row.get("login"), row.get("source"), row.get("constitution_search_mode"), row.get("constitution_spl"), row.get("constitution_pco"), row.get("constitution_brin"), row.get("msan_port"), row.get("status_label"), row.get("duration_seconds"), row.get("message")])
     return _finish(workbook, [8, 22, 22, 22, 25, 28, 30, 12, 35, 18, 14, 60])
+
+
+def commandes_results_excel(job: dict) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Informations terrain"
+    sheet.append([
+        "CMD", "Nom splitter", "Port PCO", "Nom PCO", "Modèle ONT",
+        "Client contacté", "Distance branchement (m)", "État",
+        "Durée (s)", "Message",
+    ])
+    for row in job.get("results", []):
+        sheet.append([
+            row.get("cmd"), row.get("nom_splitter"), row.get("port_pco"),
+            row.get("nom_pco"), row.get("modele_ont"),
+            row.get("client_contacte"), row.get("distance_branchement"),
+            row.get("status_label"), row.get("duration_seconds"),
+            row.get("message"),
+        ])
+    return _finish(workbook, [18, 18, 14, 24, 20, 20, 28, 18, 14, 60])

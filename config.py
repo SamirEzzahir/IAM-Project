@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     "wiam_url": "",
     "wiam_username": "",
     "wiam_password": "",
+    "commandes_url": "https://10.96.18.189/commandes",
 }
 
 
@@ -70,6 +71,9 @@ def save_config(payload: dict) -> dict:
     if wiam_url and not wiam_url.startswith(("http://", "https://")):
         raise ValueError("L’URL WIAM doit commencer par http:// ou https://")
     wiam_password = str(payload.get("wiam_password", "")).strip() or current["wiam_password"]
+    commandes_url = str(payload.get("commandes_url", current["commandes_url"])).strip()
+    if not commandes_url.startswith(("http://", "https://")):
+        raise ValueError("L'URL Commandes doit commencer par http:// ou https://")
     result = {
         "wimtech_url": url,
         "test_login": login,
@@ -80,6 +84,7 @@ def save_config(payload: dict) -> dict:
         "wiam_url": wiam_url,
         "wiam_username": str(payload.get("wiam_username", current["wiam_username"])).strip(),
         "wiam_password": wiam_password,
+        "commandes_url": commandes_url,
     }
 
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

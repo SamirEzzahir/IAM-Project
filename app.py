@@ -29,11 +29,15 @@ from assignment_excel import (
     save_msan_mapping,
 )
 from degroupage import load_degroupage_lookup, parse_degroupage_workbook, save_degroupage_lookup
+from commandes_collector import run_commandes_collection
 from config import load_config, save_config
 from job_store import JobStore
 from pco_catalog import build_pco_catalog
 from pco_logic import parse_spl
-from result_excel import assignment_results_excel, available_pcos_excel, renseigner_results_excel
+from result_excel import (
+    assignment_results_excel, available_pcos_excel, commandes_results_excel,
+    renseigner_results_excel,
+)
 from renseigner import run_renseigner
 from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
@@ -617,6 +621,46 @@ def run_renseigner_job(job_id: str) -> None:
         persist_completed_job(job_id); prune_memory_jobs()
 
 
+def run_commandes_job(job_id: str) -> None:
+    with jobs_lock:
+        job = jobs[job_id]
+        job["status"] = "RUNNING"
+        job["started_at"] = utc_now()
+        rows, stopped = copy.deepcopy(job["commandes_rows"]), job["stop_event"]
+
+    def on_result(index: int, result: dict) -> None:
+        with jobs_lock:
+            current = jobs[job_id]
+            current["results"][index] = result
+            current["completed_count"] = sum(
+                1 for item in current["results"] if item.get("status") != "PENDING"
+            )
+            current["updated_at"] = utc_now()
+
+    try:
+        run_commandes_collection(
+            config=load_config(), rows=rows, stopped=stopped.is_set,
+            on_result=on_result,
+            on_log=lambda level, message: add_log(job_id, level, message),
+        )
+        with jobs_lock:
+            current = jobs[job_id]
+            current["status"] = "STOPPED" if stopped.is_set() else "COMPLETED"
+            current["finished_at"] = utc_now()
+            current["updated_at"] = current["finished_at"]
+    except Exception as exc:
+        add_log(job_id, "ERROR", f"Erreur collecte Commandes : {exc}")
+        with jobs_lock:
+            current = jobs[job_id]
+            current["status"] = "ERROR"
+            current["error"] = str(exc)
+            current["finished_at"] = utc_now()
+            current["updated_at"] = current["finished_at"]
+    finally:
+        persist_completed_job(job_id)
+        prune_memory_jobs()
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -646,6 +690,84 @@ def generate_pcos():
 def get_config():
     config = load_config(); config.pop("wiam_password", None)
     return jsonify(ok=True, config=config)
+
+
+@app.post("/api/commandes/start")
+def start_commandes_collection():
+    payload = request.get_json(silent=True) or {}
+    commands, seen = [], set()
+    for value in str(payload.get("commands", "")).replace(";", "\n").replace(",", "\n").splitlines():
+        command = value.strip()
+        if command and command.upper() not in seen:
+            seen.add(command.upper())
+            commands.append(command)
+    if not commands:
+        return jsonify(ok=False, error="Saisissez au moins une CMD."), 400
+    if len(commands) > 2000:
+        return jsonify(ok=False, error="La liste dépasse 2000 CMD."), 400
+    config = load_config()
+    if not all(config.get(key) for key in ("commandes_url", "wiam_username", "wiam_password")):
+        return jsonify(ok=False, error="Configurez l'URL Commandes, le Login et le mot de passe WIAM."), 400
+    with jobs_lock:
+        active = next(
+            (value for value in jobs.values() if value["status"] in {"QUEUED", "RUNNING", "PAUSED", "STOPPING"}),
+            None,
+        )
+        if active:
+            return jsonify(ok=False, error="Une automatisation Selenium est déjà en cours.", job_id=active["job_id"]), 409
+        job_id, now = uuid4().hex, utc_now()
+        rows = [{"excel_row": index, "cmd": item} for index, item in enumerate(commands, 1)]
+        pending = [
+            {
+                **row, "nom_splitter": "", "port_pco": "", "nom_pco": "",
+                "modele_ont": "", "client_contacte": "", "distance_branchement": "",
+                "status": "PENDING", "status_label": "En attente", "message": "En attente.",
+            }
+            for row in rows
+        ]
+        job = {
+            "job_id": job_id, "kind": "COMMANDES", "commandes_rows": rows,
+            "status": "QUEUED", "created_at": now, "started_at": None,
+            "finished_at": None, "updated_at": now, "error": None,
+            "total": len(rows), "completed_count": 0, "results": pending,
+            "logs": [], "run_event": Event(), "stop_event": Event(), "thread": None,
+        }
+        jobs[job_id] = job
+        job["thread"] = Thread(target=run_commandes_job, args=(job_id,), daemon=True)
+        job["thread"].start()
+    return jsonify(ok=True, job_id=job_id, job=public_job(job))
+
+
+@app.get("/api/commandes/<job_id>")
+def commandes_status(job_id: str):
+    job = snapshot_job(job_id)
+    if not job or job.get("kind") != "COMMANDES":
+        return jsonify(ok=False, error="Collecte Commandes introuvable."), 404
+    return jsonify(ok=True, job=job)
+
+
+@app.post("/api/commandes/<job_id>/stop")
+def stop_commandes_collection(job_id: str):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job or job.get("kind") != "COMMANDES":
+            return jsonify(ok=False, error="Collecte Commandes introuvable."), 404
+        job["stop_event"].set()
+        job["status"] = "STOPPING"
+        job["updated_at"] = utc_now()
+    return jsonify(ok=True, status="STOPPING")
+
+
+@app.get("/api/commandes/<job_id>/result.xlsx")
+def download_commandes_collection(job_id: str):
+    job = snapshot_job(job_id)
+    if not job or job.get("kind") != "COMMANDES":
+        return jsonify(ok=False, error="Collecte Commandes introuvable."), 404
+    return send_file(
+        io.BytesIO(commandes_results_excel(job)), as_attachment=True,
+        download_name=f"informations_terrain_{job_id[:8]}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.post("/api/config")

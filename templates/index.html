@@ -22,6 +22,7 @@
         <a href="#tab-assign" data-tab="assign"><span class="nav-icon">⇄</span><span>Affectation automatique</span></a>
         <a href="#tab-bulk" data-tab="bulk"><span class="nav-icon">▤</span><span>Bulk Mutation CMD&amp;Login</span></a>
         <a href="#tab-renseigner" data-tab="renseigner"><span class="nav-icon">⌁</span><span>Renseigner PCOs</span></a>
+        <a href="#tab-commandes" data-tab="commandes"><span class="nav-icon">◉</span><span>Collecte données ConnectFlow</span></a>
         <a href="#tab-available" data-tab="available"><span class="nav-icon">✓</span><span>PCO disponibles</span></a>
         <a href="#tab-config" data-tab="config"><span class="nav-icon">⚙</span><span>Configuration</span></a>
       </nav>
@@ -87,6 +88,22 @@
             <div class="log-title"><span>●</span> Journal en direct</div>
             <div id="liveLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du lancement de Selenium…</span></div></div>
           </article>
+        </section>
+
+        <section id="tab-commandes" class="tab">
+          <article class="card panel">
+            <div class="section-heading"><span class="section-icon">◉</span><div><h2>Collecte données ConnectFlow</h2><p>Collecter les données PCO et ONT depuis le suivi workflow.</p></div></div>
+            <div class="warning top-gap"><strong>Code temporaire manuel.</strong> Après la connexion automatique, vous disposez de 10 secondes pour saisir le second code dans Chrome. Chrome reste toujours visible pour cette fonction.</div>
+            <div class="field top-gap"><label for="commandesValues">Liste de CMD</label><textarea id="commandesValues" rows="8" placeholder="Une CMD par ligne&#10;101512984"></textarea></div>
+            <div class="actions"><button id="commandesStartBtn" class="primary" type="button">▶ Lancer la collecte</button><button id="commandesStopBtn" class="secondary danger-outline" type="button" disabled>■ Arrêter</button><button id="commandesClearBtn" class="secondary" type="button">↻ Effacer</button><a id="commandesDownloadBtn" class="secondary button-link disabled" href="#">↓ Télécharger Excel</a></div>
+            <div id="commandesMessage" class="message-slot"></div>
+          </article>
+          <article class="card results-card">
+            <div class="result-head"><div><h2>Résultats terrain &amp; ROP</h2><p>Les informations de l'onglet Validation apparaissent ici.</p></div><span id="commandesStatusBadge" class="badge neutral">En attente</span></div>
+            <div class="progress-track"><div id="commandesProgressBar"></div></div>
+            <div class="results"><table><thead><tr><th>CMD</th><th>Nom splitter</th><th>Port PCO</th><th>Nom PCO</th><th>Modèle ONT</th><th>Client contacté</th><th>Distance branchement (m)</th><th>État</th><th>Durée</th><th>Message</th></tr></thead><tbody id="commandesResultsBody"><tr><td colspan="10" class="empty"><strong>Aucune collecte lancée</strong></td></tr></tbody></table></div>
+          </article>
+          <article class="log-card"><div class="log-title"><span>●</span> Journal ConnectFlow</div><div id="commandesLog" class="live-log"><div class="log-line"><time>—</time><span>En attente du lancement de Selenium…</span></div></div></article>
         </section>
 
         <section id="tab-renseigner" class="tab">
@@ -246,6 +263,7 @@
             <form id="configForm" class="config-grid">
               <div class="field full"><label for="wimtechUrl">URL Mutation GPON</label><input id="wimtechUrl" name="wimtech_url" type="url" required></div>
               <div class="field full"><label for="wiamUrl">URL recherche CMD WIAM</label><input id="wiamUrl" type="url" placeholder="http://…"></div>
+              <div class="field full"><label for="commandesUrl">URL ConnectFlow / Commandes</label><input id="commandesUrl" type="url" placeholder="https://10.96.18.189/commandes"></div>
               <div class="field"><label for="wiamUsername">Login WIAM</label><input id="wiamUsername" type="text"></div>
               <div class="field"><label for="wiamPassword">Mot de passe WIAM</label><input id="wiamPassword" type="password" placeholder="Laisser vide pour conserver"></div>
               <div class="field"><label for="testLogin">Login de test</label><input id="testLogin" name="test_login" type="text" required></div>
