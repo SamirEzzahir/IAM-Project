@@ -19,8 +19,10 @@ from wimtech_checker import (
     cancel_current_pco,
     click_element,
     has_no_available_fibre_port,
+    extract_current_constitution,
     open_active_cable,
     open_add_constitution_form,
+    open_login_constitution_page,
     prepare_pco_form,
     save_diagnostic,
     submit_pco_location,
@@ -215,6 +217,7 @@ def assign_login_to_first_port(
     on_result: Callable[[int, dict], None],
     driver=None,
     initial_form_ready: bool = False,
+    replace_existing: bool = True,
 ) -> dict | None:
     """Try candidate PCOs in order and stop after the first confirmed mutation."""
 
@@ -227,6 +230,44 @@ def assign_login_to_first_port(
         on_log("INFO", f"Ouverture de Chrome pour l’affectation du Login {login}…")
         if owns_driver:
             driver = build_driver(bool(config.get("headless", False)), action_delay_seconds=action_delay_from_config(config))
+
+        if not replace_existing:
+            started_at = time.monotonic()
+            open_login_constitution_page(driver, config, login)
+            existing = extract_current_constitution(driver)
+            if existing.get("pco"):
+                result = {
+                    "pco": existing["pco"],
+                    "source_pco": existing["pco"],
+                    "spl": existing.get("spl", ""),
+                    "selected_port": existing.get("brin", ""),
+                    "msan_port": "",
+                    "status": "ALREADY_CONSTITUTED",
+                    "status_label": "Déjà constitué",
+                    "pco_exists": True,
+                    "duration_seconds": round(time.monotonic() - started_at, 2),
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                    "message": "Login déjà constitué : constitution existante conservée.",
+                }
+                on_result(0, result)
+                on_log(
+                    "INFO",
+                    f"{login} déjà constitué sur {existing['pco']} / brin {existing.get('brin') or '—'}.",
+                )
+                for index, candidate in enumerate(candidates[1:], 1):
+                    on_result(index, {
+                        "pco": candidate, "status": "SKIPPED",
+                        "status_label": "Ignoré", "pco_exists": None,
+                        "selected_port": None, "duration_seconds": 0,
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                        "skipped_by": existing["pco"],
+                        "message": "Aucune mutation : le Login possède déjà une constitution.",
+                    })
+                return result
+            open_add_constitution_form(
+                driver, int(config["timeout_seconds"]), delete_existing=False
+            )
+            next_form_ready = True
 
         def test_candidate(index: int, pco: str) -> dict | None:
             nonlocal next_form_ready

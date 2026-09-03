@@ -107,6 +107,7 @@ def wait_reload(driver, previous_document, timeout: int) -> None:
 
 def set_input(driver, element_id: str, value: str, timeout: int) -> None:
     last_error = None
+    expected_value = str(value or "")
     for _ in range(4):
         try:
             field = WebDriverWait(driver, timeout).until(
@@ -115,8 +116,38 @@ def set_input(driver, element_id: str, value: str, timeout: int) -> None:
             selenium_action_delay(driver)
             field.clear()
             selenium_action_delay(driver)
-            field.send_keys(value)
-            return
+            field.send_keys(expected_value)
+
+            # Some internal pages install global keyboard shortcuts. A typed
+            # "t" can consequently be consumed instead of reaching the
+            # Login field. Never submit a silently altered identifier.
+            actual_value = field.get_attribute("value") or ""
+            if actual_value != expected_value:
+                driver.execute_script(
+                    """
+                    const field = arguments[0];
+                    const value = arguments[1];
+                    const prototype = field instanceof HTMLTextAreaElement
+                        ? HTMLTextAreaElement.prototype
+                        : HTMLInputElement.prototype;
+                    const setter = Object.getOwnPropertyDescriptor(
+                        prototype, 'value'
+                    )?.set;
+                    if (setter) setter.call(field, value);
+                    else field.value = value;
+                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                    field.dispatchEvent(new Event('change', { bubbles: true }));
+                    """,
+                    field,
+                    expected_value,
+                )
+                actual_value = field.get_attribute("value") or ""
+            if actual_value == expected_value:
+                return
+            last_error = RuntimeError(
+                f"La page a modifié la valeur du champ {element_id} : "
+                f"{actual_value!r} au lieu de {expected_value!r}."
+            )
         except StaleElementReferenceException as exc:
             last_error = exc
     if last_error:
@@ -241,6 +272,31 @@ def find_deletable_constitution_checkboxes(driver):
         "//*[@id='frm:constitutionList']//input[@type='checkbox' and not(@disabled)]",
     )
     return [checkbox for checkbox in checkboxes if checkbox.is_enabled()]
+
+
+def extract_current_constitution(driver) -> dict[str, str]:
+    """Read the existing downstream SPL/PCO/brin from constitutionList."""
+
+    tables = driver.find_elements(By.ID, "frm:constitutionList")
+    if not tables:
+        return {"spl": "", "pco": "", "brin": ""}
+    tbody = tables[0].find_element(By.TAG_NAME, "tbody")
+    aval_index = 0
+    spl = pco = brin = ""
+    for row in tbody.find_elements(By.TAG_NAME, "tr"):
+        cells = row.find_elements(By.TAG_NAME, "td")
+        if len(cells) < 10:
+            continue
+        aval_index += 1
+        geo_aval = (cells[9].text or "").strip()
+        if aval_index == 1:
+            spl = geo_aval
+        elif aval_index == 2:
+            pco = geo_aval
+            spl = (cells[1].text or "").strip() or spl
+            brin = (cells[8].text or "").strip()
+            break
+    return {"spl": spl, "pco": pco, "brin": brin}
 
 
 def delete_old_constitution(driver, timeout: int) -> int:
@@ -409,9 +465,8 @@ def wait_for_msan_port_from_equipment_table(driver, timeout: int) -> str:
             raise table_error from exc
 
 
-def open_login_constitution(driver, config: dict, login: str) -> str:
-    """Open a Login's constitution and return its normalized MSAN port key."""
-
+def open_login_constitution_page(driver, config: dict, login: str) -> None:
+    """Open a Login's constitution page without requiring its MSAN table."""
     timeout = int(config["timeout_seconds"])
     navigate(driver, config["wimtech_url"])
     wait_document(driver, timeout)
@@ -428,6 +483,13 @@ def open_login_constitution(driver, config: dict, login: str) -> str:
     WebDriverWait(driver, timeout).until(
         EC.presence_of_element_located((By.ID, "frm:constitutionList"))
     )
+
+
+def open_login_constitution(driver, config: dict, login: str) -> str:
+    """Open a Login's constitution and return its normalized MSAN port key."""
+
+    timeout = int(config["timeout_seconds"])
+    open_login_constitution_page(driver, config, login)
     return wait_for_msan_port_from_equipment_table(driver, timeout)
 
 

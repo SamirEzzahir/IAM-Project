@@ -43,7 +43,8 @@ from wimtech_assigner import assign_login_to_first_port
 from wimtech_bulk_mutator import mutate_bulk_rows
 from wimtech_checker import (
     action_delay_from_config, build_driver, check_all_pcos, close_driver,
-    open_add_constitution_form, open_login_constitution,
+    extract_current_constitution, open_add_constitution_form,
+    open_login_constitution,
 )
 
 
@@ -326,6 +327,7 @@ def run_assignment_job(job_id: str) -> None:
         spl_data = job["spl_data"]
         login = job["login"]
         stop_event = job["stop_event"]
+        replace_existing = bool(job.get("replace_existing", False))
 
     def on_result(index: int, result: dict) -> None:
         with jobs_lock:
@@ -357,8 +359,9 @@ def run_assignment_job(job_id: str) -> None:
             is_stopped=stop_event.is_set,
             on_log=lambda level, message: add_log(job_id, level, message),
             on_result=on_result,
+            replace_existing=replace_existing,
         )
-        if assigned and not stop_event.is_set():
+        if assigned and assigned.get("status") == "ASSIGNED" and not stop_event.is_set():
             add_log(
                 job_id,
                 "INFO",
@@ -443,12 +446,15 @@ def assignment_exhausted_message(results: list[dict]) -> str:
     return "Aucun port utilisable trouvé. Consultez le détail des PCOs testées."
 
 
-def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> dict:
+def process_batch_assignment_row(
+    job_id: str, row: dict, stop_event: Event, replace_existing: bool
+) -> dict:
     if row.get("validation_error"):
         return {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
     config = load_config()
     driver = None
     reuse_current_constitution = False
+    assignment_replace_existing = replace_existing
     try:
         if not row.get("spl"):
             driver = build_driver(
@@ -456,6 +462,17 @@ def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> d
                 action_delay_seconds=action_delay_from_config(config),
             )
             msan_port = open_login_constitution(driver, config, row["login"])
+            existing = extract_current_constitution(driver)
+            if not replace_existing and existing.get("pco"):
+                return {
+                    **row, "spl": existing.get("spl", ""),
+                    "pco": existing["pco"],
+                    "selected_port": existing.get("brin", ""),
+                    "msan_port": msan_port,
+                    "status": "ALREADY_CONSTITUTED",
+                    "status_label": "Déjà constitué",
+                    "message": "Login déjà constitué : constitution existante conservée.",
+                }
             resolved_spl = resolve_msan_spl(MSAN_MAPPING_PATH, msan_port)
             if not resolved_spl:
                 raise ValueError(f"Aucun SPL configuré pour le port MSAN {msan_port}.")
@@ -464,6 +481,9 @@ def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> d
                 driver, int(config["timeout_seconds"]), delete_existing=True
             )
             reuse_current_constitution = True
+            # This Login was already inspected above. Continue from the open
+            # Ajouter form without researching it a second time.
+            assignment_replace_existing = True
         spl_data = parse_spl(row["spl"]).to_dict()
         detail_results = []
         add_log(job_id, "INFO", f"Ligne {row['excel_row']} : affectation {row['login']} / {row['spl']}")
@@ -474,11 +494,22 @@ def process_batch_assignment_row(job_id: str, row: dict, stop_event: Event) -> d
             on_log=lambda level, message: add_log(job_id, level, message),
             on_result=lambda _i, item: detail_results.append(item),
             driver=driver, initial_form_ready=reuse_current_constitution,
+            replace_existing=assignment_replace_existing,
         )
     finally:
         close_driver(driver)
     uncertain = next((item for item in detail_results if item.get("status") == "MUTATION_UNKNOWN"), None)
     if assigned:
+        if assigned.get("status") == "ALREADY_CONSTITUTED":
+            return {
+                **row, "spl": assigned.get("spl") or row.get("spl"),
+                "status": "ALREADY_CONSTITUTED",
+                "status_label": "Déjà constitué",
+                "pco": assigned.get("pco"),
+                "selected_port": assigned.get("selected_port"),
+                "msan_port": assigned.get("msan_port", ""),
+                "message": assigned["message"],
+            }
         return {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
     if uncertain:
         return {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
@@ -492,6 +523,7 @@ def run_batch_assignment_job(job_id: str) -> None:
         job["started_at"] = utc_now()
         rows = copy.deepcopy(job["assignment_rows"])
         stop_event = job["stop_event"]
+        replace_existing = bool(job.get("replace_existing", False))
 
     try:
         for index, row in enumerate(rows):
@@ -499,7 +531,9 @@ def run_batch_assignment_job(job_id: str) -> None:
                 break
             started = time.monotonic()
             try:
-                result = process_batch_assignment_row(job_id, row, stop_event)
+                result = process_batch_assignment_row(
+                    job_id, row, stop_event, replace_existing
+                )
             except Exception as exc:
                 result = {**row, "status": "ERROR", "status_label": "Erreur", "pco": None, "selected_port": None, "message": str(exc)}
                 add_log(job_id, "ERROR", f"Ligne {row['excel_row']} : {exc}")
@@ -943,6 +977,7 @@ def start_check():
 @app.post("/api/assign/start")
 def start_assignment():
     payload = request.get_json(silent=True) or {}
+    replace_existing = bool(payload.get("replace_existing", False))
     login = str(payload.get("login", "")).strip()
     if not login:
         return jsonify(ok=False, error="Le Login client est obligatoire."), 400
@@ -977,6 +1012,7 @@ def start_assignment():
             "odf": spl_result.odf,
             "zr": spl_result.zr,
             "spl_data": spl_data,
+            "replace_existing": replace_existing,
             "status": "QUEUED",
             "created_at": now,
             "started_at": None,
@@ -1011,6 +1047,7 @@ def start_assignment():
 
 @app.post("/api/assign/batch/start")
 def start_batch_assignment():
+    replace_existing = str(request.form.get("replace_existing", "false")).lower() in {"1", "true", "yes", "on"}
     uploaded = request.files.get("file")
     if not uploaded or Path(uploaded.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
         return jsonify(ok=False, error="Sélectionnez un fichier Excel .xlsx ou .xlsm avec Login et SPL."), 400
@@ -1025,6 +1062,7 @@ def start_batch_assignment():
         job_id, now = uuid4().hex, utc_now()
         job = {
             "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
+            "replace_existing": replace_existing,
             "status": "QUEUED", "created_at": now, "started_at": None,
             "finished_at": None, "updated_at": now, "error": None,
             "total": len(rows), "completed_count": 0,
@@ -1055,6 +1093,7 @@ def preview_batch_assignment():
 @app.post("/api/assign/logins/start")
 def start_login_only_assignment():
     payload = request.get_json(silent=True) or {}
+    replace_existing = bool(payload.get("replace_existing", False))
     logins = []
     seen = set()
     for value in str(payload.get("logins", "")).replace(";", "\n").replace(",", "\n").splitlines():
@@ -1074,7 +1113,8 @@ def start_login_only_assignment():
         job_id, now = uuid4().hex, utc_now()
         job = {
             "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
-            "source": "LOGIN_ONLY", "status": "QUEUED", "created_at": now,
+            "source": "LOGIN_ONLY", "replace_existing": replace_existing,
+            "status": "QUEUED", "created_at": now,
             "started_at": None, "finished_at": None, "updated_at": now,
             "error": None, "total": len(rows), "completed_count": 0,
             "results": [{**row, "status": "PENDING", "status_label": "En attente", "pco": None, "selected_port": None, "message": "Recherche du port MSAN et du SPL en attente."} for row in rows],

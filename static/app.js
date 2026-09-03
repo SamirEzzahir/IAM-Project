@@ -179,7 +179,7 @@ async function previewAssignmentSpl() {
 }
 
 function statusClass(status) {
-  return ({ AVAILABLE: "ok", ASSIGNED: "ok", MUTATED: "ok", SATURATED: "saturated", NOT_FOUND: "missing", NOT_CREATED: "missing", BRIN_NOT_FOUND: "missing", SEARCH_FAILED: "missing", INVALID: "error", NO_MUTATION_ACTION: "warning", ERROR: "error", MUTATION_UNKNOWN: "error", UNKNOWN: "warning", SKIPPED: "skipped", PENDING: "wait" })[status] || "wait";
+  return ({ AVAILABLE: "ok", ASSIGNED: "ok", MUTATED: "ok", ALREADY_CONSTITUTED: "warning", SATURATED: "saturated", NOT_FOUND: "missing", NOT_CREATED: "missing", BRIN_NOT_FOUND: "missing", SEARCH_FAILED: "missing", INVALID: "error", NO_MUTATION_ACTION: "warning", ERROR: "error", MUTATION_UNKNOWN: "error", UNKNOWN: "warning", SKIPPED: "skipped", PENDING: "wait" })[status] || "wait";
 }
 
 function renderRows(rows) {
@@ -256,7 +256,9 @@ function renderAssignmentLogs(logs) {
 function renderAssignmentJob(job) {
   if (job.kind === "BATCH_ASSIGNMENT") {
     $("assignTotalStat").textContent = job.total;
-    $("assignOutcomeStat").textContent = `${job.results.filter((row) => row.status === "ASSIGNED").length} affecté(s)`;
+    const assignedCount = job.results.filter((row) => row.status === "ASSIGNED").length;
+    const existingCount = job.results.filter((row) => row.status === "ALREADY_CONSTITUTED").length;
+    $("assignOutcomeStat").textContent = `${assignedCount} affecté(s)${existingCount ? ` · ${existingCount} déjà constitué(s)` : ""}`;
     $("assignMissingStat").textContent = job.results.filter((row) => row.status === "INVALID").length;
     $("assignSaturatedStat").textContent = job.results.filter((row) => row.status === "NO_PORT").length;
     $("assignProgressBar").style.width = `${job.progress_percent}%`;
@@ -271,13 +273,14 @@ function renderAssignmentJob(job) {
     return;
   }
   const assigned = job.assigned_result;
+  const existing = (job.results || []).find((row) => row.status === "ALREADY_CONSTITUTED");
   $("assignTotalStat").textContent = job.total;
-  $("assignOutcomeStat").textContent = assigned ? `Port ${assigned.selected_port}` : (job.status === "COMPLETED" ? "Aucun" : "—");
+  $("assignOutcomeStat").textContent = assigned ? `Port ${assigned.selected_port}` : existing ? "Déjà constitué" : (job.status === "COMPLETED" ? "Aucun" : "—");
   $("assignMissingStat").textContent = job.not_found_count;
   $("assignSaturatedStat").textContent = job.saturated_count;
   $("assignProgressBar").style.width = `${job.progress_percent}%`;
   $("assignStatusBadge").textContent = ({ RUNNING: "En cours", STOPPING: "Arrêt…", STOPPED: "Arrêté", COMPLETED: "Terminé", REVIEW_REQUIRED: "À confirmer", ERROR: "Erreur", QUEUED: "Préparation" })[job.status] || job.status;
-  $("assignStatusBadge").className = `badge ${assigned ? "ok" : job.status === "REVIEW_REQUIRED" ? "error" : job.status === "ERROR" ? "error" : "neutral"}`;
+  $("assignStatusBadge").className = `badge ${assigned ? "ok" : existing ? "warning" : job.status === "REVIEW_REQUIRED" ? "error" : job.status === "ERROR" ? "error" : "neutral"}`;
   renderAssignmentRows(job);
   renderAssignmentLogs(job.logs);
 
@@ -290,6 +293,8 @@ function renderAssignmentJob(job) {
 
   if (job.status === "COMPLETED" && assigned) {
     $("assignMessage").innerHTML = `<div class="success"><strong>Affectation terminée.</strong> Login ${escapeHtml(job.login)} affecté à <span class="pco-code">${escapeHtml(assigned.pco)}</span>, port <strong>${escapeHtml(assigned.selected_port)}</strong>.</div>`;
+  } else if (job.status === "COMPLETED" && existing) {
+    $("assignMessage").innerHTML = `<div class="warning"><strong>Login déjà constitué.</strong> Constitution conservée sans mutation : SPL <span class="pco-code">${escapeHtml(existing.spl || job.spl || "—")}</span>, PCO <span class="pco-code">${escapeHtml(existing.pco || "—")}</span>, brin <strong>${escapeHtml(existing.selected_port || "—")}</strong>.</div>`;
   } else if (job.status === "COMPLETED") {
     const summaries = [...new Set((job.results || []).filter((row) => row.status === "NO_PORT").map((row) => row.message).filter(Boolean))];
     $("assignMessage").innerHTML = summaries.length
@@ -325,7 +330,7 @@ async function startAssignment() {
   if (mode === "batch") {
     const batchFile = $("assignBatchFile").files[0];
     if (!batchFile) return toast("Sélectionnez le fichier Excel Login/SPL.");
-    const formData = new FormData(); formData.append("file", batchFile);
+    const formData = new FormData(); formData.append("file", batchFile); formData.append("replace_existing", $("assignReplaceExisting").checked ? "true" : "false");
     $("assignMessage").innerHTML = '<div class="notice">Lecture du fichier Login/SPL…</div>';
     $("assignStartBtn").disabled = true;
     try {
@@ -343,7 +348,7 @@ async function startAssignment() {
     try {
       const data = await api("/api/assign/logins/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logins: loginList }),
+        body: JSON.stringify({ logins: loginList, replace_existing: $("assignReplaceExisting").checked }),
       });
       currentAssignmentJobId = data.job_id; renderAssignmentJob(data.job);
       clearInterval(assignmentPollTimer);
@@ -364,7 +369,7 @@ async function startAssignment() {
     const data = await api("/api/assign/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login, spl }),
+      body: JSON.stringify({ login, spl, replace_existing: $("assignReplaceExisting").checked }),
     });
     currentAssignmentJobId = data.job_id;
     renderAssignmentJob(data.job);
