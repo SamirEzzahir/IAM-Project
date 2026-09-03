@@ -75,7 +75,7 @@ def commandes_results_excel(job: dict) -> bytes:
     sheet = workbook.active
     sheet.title = "Informations terrain"
     sheet.append([
-        "CMD", "Nom splitter", "Port PCO", "Nom PCO", "Modèle ONT",
+        "CMD", "Nom splitter", "Nom PCO", "Port PCO", "Modèle ONT",
         "Client contacté", "Distance branchement (m)", "État",
         "Durée (s)", "Message",
     ])
