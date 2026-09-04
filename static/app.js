@@ -296,7 +296,7 @@ function renderAssignmentJob(job) {
   } else if (job.status === "COMPLETED" && existing) {
     $("assignMessage").innerHTML = `<div class="warning"><strong>Login déjà constitué.</strong> Constitution conservée sans mutation : SPL <span class="pco-code">${escapeHtml(existing.spl || job.spl || "—")}</span>, PCO <span class="pco-code">${escapeHtml(existing.pco || "—")}</span>, brin <strong>${escapeHtml(existing.selected_port || "—")}</strong>.</div>`;
   } else if (job.status === "COMPLETED") {
-    const summaries = [...new Set((job.results || []).filter((row) => row.status === "NO_PORT").map((row) => row.message).filter(Boolean))];
+    const summaries = job.summary_message ? [job.summary_message] : [...new Set((job.results || []).filter((row) => row.status === "NO_PORT").map((row) => row.message).filter(Boolean))];
     $("assignMessage").innerHTML = summaries.length
       ? `<div class="warning"><strong>Aucun port utilisable.</strong><br>${summaries.map(escapeHtml).join("<br>")}</div>`
       : '<div class="warning"><strong>Aucun port utilisable.</strong> Consultez la liste complète ci-dessous pour voir les PCO saturés, inexistants ou ignorés.</div>';
@@ -330,7 +330,7 @@ async function startAssignment() {
   if (mode === "batch") {
     const batchFile = $("assignBatchFile").files[0];
     if (!batchFile) return toast("Sélectionnez le fichier Excel Login/SPL.");
-    const formData = new FormData(); formData.append("file", batchFile); formData.append("replace_existing", $("assignReplaceExisting").checked ? "true" : "false");
+    const formData = new FormData(); formData.append("file", batchFile); formData.append("replace_existing", $("assignReplaceExisting").checked ? "true" : "false"); formData.append("show_zr_in_message", $("assignShowZrInMessage").checked ? "true" : "false");
     $("assignMessage").innerHTML = '<div class="notice">Lecture du fichier Login/SPL…</div>';
     $("assignStartBtn").disabled = true;
     try {
@@ -348,7 +348,7 @@ async function startAssignment() {
     try {
       const data = await api("/api/assign/logins/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logins: loginList, replace_existing: $("assignReplaceExisting").checked }),
+        body: JSON.stringify({ logins: loginList, replace_existing: $("assignReplaceExisting").checked, show_zr_in_message: $("assignShowZrInMessage").checked }),
       });
       currentAssignmentJobId = data.job_id; renderAssignmentJob(data.job);
       clearInterval(assignmentPollTimer);
@@ -369,7 +369,7 @@ async function startAssignment() {
     const data = await api("/api/assign/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login, spl, replace_existing: $("assignReplaceExisting").checked }),
+      body: JSON.stringify({ login, spl, replace_existing: $("assignReplaceExisting").checked, show_zr_in_message: $("assignShowZrInMessage").checked }),
     });
     currentAssignmentJobId = data.job_id;
     renderAssignmentJob(data.job);

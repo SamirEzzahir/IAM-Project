@@ -12,6 +12,7 @@ import hmac
 import io
 import json
 import os
+import re
 import sqlite3
 import time
 import webbrowser
@@ -328,6 +329,7 @@ def run_assignment_job(job_id: str) -> None:
         login = job["login"]
         stop_event = job["stop_event"]
         replace_existing = bool(job.get("replace_existing", False))
+        show_zr_in_message = bool(job.get("show_zr_in_message", False))
 
     def on_result(index: int, result: dict) -> None:
         with jobs_lock:
@@ -391,6 +393,12 @@ def run_assignment_job(job_id: str) -> None:
                 on_result=on_availability_result,
             )
             persist_available(job_id)
+        elif not assigned and not stop_event.is_set():
+            with jobs_lock:
+                summary_results = copy.deepcopy(jobs[job_id]["results"])
+                jobs[job_id]["summary_message"] = assignment_exhausted_message(
+                    summary_results, show_zr=show_zr_in_message
+                )
         with jobs_lock:
             current = jobs[job_id]
             if any(row.get("status") == "ASSIGNED" for row in current["results"]):
@@ -424,30 +432,73 @@ def run_assignment_job(job_id: str) -> None:
         prune_memory_jobs()
 
 
-def assignment_exhausted_message(results: list[dict]) -> str:
+def compact_missing_pcos(results: list[dict]) -> list[str]:
+    """Collapse meaningless base/split missing combinations by PCO group."""
+
+    groups: dict[str, dict[str, str]] = {}
+    order: list[str] = []
+    for item in results:
+        if item.get("status") != "NOT_FOUND":
+            continue
+        pco = str(item.get("source_pco") or item.get("pco") or "").strip()
+        if not pco:
+            continue
+        match = re.match(r"^(.*?)(/[12])?$", pco)
+        base, suffix = match.group(1), match.group(2) or "base"
+        if base not in groups:
+            groups[base] = {}
+            order.append(base)
+        groups[base][suffix] = pco
+
+    compacted: list[str] = []
+    for base in order:
+        missing = groups[base]
+        if all(key in missing for key in ("base", "/1", "/2")):
+            compacted.append(missing["base"])
+            continue
+        # As soon as one split exists, the missing 8-port base has no useful
+        # business meaning. Only report the missing half/halves.
+        for suffix in ("/1", "/2"):
+            if suffix in missing:
+                compacted.append(missing[suffix])
+        if "base" in missing and "/1" not in missing and "/2" not in missing:
+            # Both split forms exist: there is no missing capacity to report.
+            continue
+    return compacted
+
+
+def display_pco_name(pco: str, show_zr: bool) -> str:
+    return pco if show_zr else pco.rsplit("-", 1)[-1]
+
+
+def assignment_exhausted_message(
+    results: list[dict], *, show_zr: bool = False
+) -> str:
     """Summarize saturated and not-yet-created PCO candidates."""
 
-    missing, saturated, other = [], [], []
+    missing = compact_missing_pcos(results)
+    saturated, other = [], []
     for item in results:
         status = item.get("status")
         pco = item.get("source_pco") or item.get("pco")
-        if status == "NOT_FOUND" and pco and pco not in missing:
-            missing.append(pco)
-        elif status == "SATURATED" and pco and pco not in saturated:
+        if status == "SATURATED" and pco and pco not in saturated:
             saturated.append(pco)
         elif status not in {"SKIPPED", "NOT_FOUND", "SATURATED"}:
             other.append(item)
     if saturated and missing and not other:
-        return "Toutes les PCOs existantes sont saturées, et les PCOs " + ", ".join(missing) + " ne sont pas encore créées."
+        displayed = [display_pco_name(pco, show_zr) for pco in missing]
+        return "Toutes les PCOs existantes sont saturées, et les PCOs " + ", ".join(displayed) + " ne sont pas encore créées."
     if saturated and not missing and not other:
         return "Toutes les PCOs sont saturées / SPL saturé."
     if missing and not other:
-        return "PCOs non encore créées : " + ", ".join(missing) + "."
+        displayed = [display_pco_name(pco, show_zr) for pco in missing]
+        return "PCOs non encore créées : " + ", ".join(displayed) + "."
     return "Aucun port utilisable trouvé. Consultez le détail des PCOs testées."
 
 
 def process_batch_assignment_row(
-    job_id: str, row: dict, stop_event: Event, replace_existing: bool
+    job_id: str, row: dict, stop_event: Event, replace_existing: bool,
+    show_zr_in_message: bool,
 ) -> dict:
     if row.get("validation_error"):
         return {**row, "status": "INVALID", "status_label": "Ligne invalide", "message": row["validation_error"]}
@@ -513,7 +564,7 @@ def process_batch_assignment_row(
         return {**row, "status": "ASSIGNED", "status_label": "Affecté", "pco": assigned["pco"], "selected_port": assigned["selected_port"], "message": assigned["message"]}
     if uncertain:
         return {**row, "status": "MUTATION_UNKNOWN", "status_label": "À confirmer", "pco": uncertain.get("pco"), "selected_port": uncertain.get("selected_port"), "message": uncertain["message"]}
-    return {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": assignment_exhausted_message(detail_results)}
+    return {**row, "status": "NO_PORT", "status_label": "Aucun port", "pco": None, "selected_port": None, "message": assignment_exhausted_message(detail_results, show_zr=show_zr_in_message)}
 
 
 def run_batch_assignment_job(job_id: str) -> None:
@@ -524,6 +575,7 @@ def run_batch_assignment_job(job_id: str) -> None:
         rows = copy.deepcopy(job["assignment_rows"])
         stop_event = job["stop_event"]
         replace_existing = bool(job.get("replace_existing", False))
+        show_zr_in_message = bool(job.get("show_zr_in_message", False))
 
     try:
         for index, row in enumerate(rows):
@@ -532,7 +584,8 @@ def run_batch_assignment_job(job_id: str) -> None:
             started = time.monotonic()
             try:
                 result = process_batch_assignment_row(
-                    job_id, row, stop_event, replace_existing
+                    job_id, row, stop_event, replace_existing,
+                    show_zr_in_message,
                 )
             except Exception as exc:
                 result = {**row, "status": "ERROR", "status_label": "Erreur", "pco": None, "selected_port": None, "message": str(exc)}
@@ -978,6 +1031,7 @@ def start_check():
 def start_assignment():
     payload = request.get_json(silent=True) or {}
     replace_existing = bool(payload.get("replace_existing", False))
+    show_zr_in_message = bool(payload.get("show_zr_in_message", False))
     login = str(payload.get("login", "")).strip()
     if not login:
         return jsonify(ok=False, error="Le Login client est obligatoire."), 400
@@ -1013,6 +1067,7 @@ def start_assignment():
             "zr": spl_result.zr,
             "spl_data": spl_data,
             "replace_existing": replace_existing,
+            "show_zr_in_message": show_zr_in_message,
             "status": "QUEUED",
             "created_at": now,
             "started_at": None,
@@ -1048,6 +1103,7 @@ def start_assignment():
 @app.post("/api/assign/batch/start")
 def start_batch_assignment():
     replace_existing = str(request.form.get("replace_existing", "false")).lower() in {"1", "true", "yes", "on"}
+    show_zr_in_message = str(request.form.get("show_zr_in_message", "false")).lower() in {"1", "true", "yes", "on"}
     uploaded = request.files.get("file")
     if not uploaded or Path(uploaded.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
         return jsonify(ok=False, error="Sélectionnez un fichier Excel .xlsx ou .xlsm avec Login et SPL."), 400
@@ -1063,6 +1119,7 @@ def start_batch_assignment():
         job = {
             "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
             "replace_existing": replace_existing,
+            "show_zr_in_message": show_zr_in_message,
             "status": "QUEUED", "created_at": now, "started_at": None,
             "finished_at": None, "updated_at": now, "error": None,
             "total": len(rows), "completed_count": 0,
@@ -1094,6 +1151,7 @@ def preview_batch_assignment():
 def start_login_only_assignment():
     payload = request.get_json(silent=True) or {}
     replace_existing = bool(payload.get("replace_existing", False))
+    show_zr_in_message = bool(payload.get("show_zr_in_message", False))
     logins = []
     seen = set()
     for value in str(payload.get("logins", "")).replace(";", "\n").replace(",", "\n").splitlines():
@@ -1114,6 +1172,7 @@ def start_login_only_assignment():
         job = {
             "job_id": job_id, "kind": "BATCH_ASSIGNMENT", "assignment_rows": rows,
             "source": "LOGIN_ONLY", "replace_existing": replace_existing,
+            "show_zr_in_message": show_zr_in_message,
             "status": "QUEUED", "created_at": now,
             "started_at": None, "finished_at": None, "updated_at": now,
             "error": None, "total": len(rows), "completed_count": 0,
